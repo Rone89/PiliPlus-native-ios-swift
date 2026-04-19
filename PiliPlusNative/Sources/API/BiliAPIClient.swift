@@ -4,10 +4,20 @@ import Foundation
 actor BiliAPIClient {
     static let shared = BiliAPIClient()
 
-    static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    static let webUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    static let appUserAgent = "Mozilla/5.0 BiliDroid/2.0.1 (bbcallen@gmail.com) os/android model/android_hd mobi_app/android_hd build/2001100 channel/master innerVer/2001100 osVer/15 network/2"
 
     private let apiBaseURL = URL(string: "https://api.bilibili.com")!
     private let searchBaseURL = URL(string: "https://s.search.bilibili.com")!
+    private let passBaseURL = URL(string: "https://passport.bilibili.com")!
+    private let vcBaseURL = URL(string: "https://api.vc.bilibili.com")!
+    private let messageBaseURL = URL(string: "https://message.bilibili.com")!
+
+    private let appKey = "dfca71928277209b"
+    private let appSecret = "b5475a8825547a4fc26c7d518eaaa02e"
+    private let appTraceID = "11111111111111111111111111111111:1111111111111111:0:0"
+    private let dynamicFeatures = "itemOpusStyle,listOnlyfans,onlyfansQaCard"
+
     private var cachedMixinKey: String?
     private var cachedMixinDay: Int?
 
@@ -26,8 +36,7 @@ actor BiliAPIClient {
             ])
         )
 
-        let items = payload.data.array("item")
-        return items.compactMap { item in
+        return payload.data.array("item").compactMap { item in
             guard item.string("goto") == "av" else { return nil }
             return BiliVideo(json: item)
         }
@@ -60,7 +69,7 @@ actor BiliAPIClient {
     }
 
     func fetchSearchSuggestions(term: String) async throws -> [String] {
-        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = term.trimmed
         guard !trimmed.isEmpty else { return [] }
 
         let payload = try await request(
@@ -73,12 +82,10 @@ actor BiliAPIClient {
             ]
         )
 
-        let tags = payload.data.array("tag")
-        let values = tags.compactMap { item in
+        let suggestions = payload.data.array("tag").compactMap { item in
             BiliFormat.plainText(item.string("value") ?? item.string("name"))
         }
-
-        return NSOrderedSet(array: values).array as? [String] ?? values
+        return NSOrderedSet(array: suggestions).array as? [String] ?? suggestions
     }
 
     func searchVideos(keyword: String, page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
@@ -112,6 +119,362 @@ actor BiliAPIClient {
 
         let payload = try await fetchViewPayload(query: ["aid": "\(aid)"])
         return payload.data.string("bvid")
+    }
+
+    func beginQRCodeLogin() async throws -> QRCodeLoginInfo {
+        var params = [
+            "local_id": "0",
+            "platform": "android",
+            "mobi_app": "android_hd"
+        ]
+        params = appSignedParameters(params)
+
+        let payload = try await request(
+            baseURL: passBaseURL,
+            path: "/x/passport-tv-login/qrcode/auth_code",
+            method: "POST",
+            query: params,
+            headers: tvHeaders
+        )
+
+        guard let authCode = payload.data.string("auth_code"),
+              let url = payload.data.string("url") else {
+            throw APIError.invalidResponse("扫码登录二维码信息为空")
+        }
+
+        return QRCodeLoginInfo(authCode: authCode, url: url)
+    }
+
+    func pollQRCodeLogin(authCode: String) async throws -> QRCodeLoginResult {
+        var params = [
+            "auth_code": authCode,
+            "local_id": "0"
+        ]
+        params = appSignedParameters(params)
+
+        let payload = try await rawRequest(
+            baseURL: passBaseURL,
+            path: "/x/passport-tv-login/qrcode/poll",
+            method: "POST",
+            query: params,
+            headers: tvHeaders
+        )
+
+        switch payload.code {
+        case 0:
+            let data = payload.data.raw
+            let tokenInfo = data.dictionary("token_info") ?? [:]
+            let cookieInfo = data.dictionary("cookie_info")?.array("cookies") ?? []
+            let session = BiliSession.from(tokenInfo: tokenInfo, cookieInfo: cookieInfo)
+            return QRCodeLoginResult(status: .confirmed, message: "扫码登录成功", session: session)
+        case 86039:
+            return QRCodeLoginResult(status: .pending, message: "等待扫码", session: nil)
+        case 86090:
+            return QRCodeLoginResult(status: .scanned, message: "已扫码，请在手机上确认", session: nil)
+        case 86038:
+            return QRCodeLoginResult(status: .expired, message: "二维码已过期", session: nil)
+        default:
+            return QRCodeLoginResult(status: .failed, message: payload.message.isEmpty ? "登录失败" : payload.message, session: nil)
+        }
+    }
+
+    func logout(session: BiliSession) async throws {
+        let _ = try await request(
+            baseURL: passBaseURL,
+            path: "/login/exit/v2",
+            method: "POST",
+            query: [:],
+            body: ["biliCSRF": session.csrf],
+            contentType: .form,
+            headers: authenticatedHeaders(session: session)
+        )
+    }
+
+    func fetchCurrentUser(session: BiliSession) async throws -> BiliCurrentUser {
+        async let navPayload = request(
+            path: "/x/web-interface/nav",
+            query: [:],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        async let statPayload = request(
+            path: "/x/web-interface/nav/stat",
+            query: [:],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let nav = try await navPayload
+        let stat = try await statPayload
+
+        guard let mid = BiliFormat.intValue(nav.data.raw["mid"]),
+              let name = nav.data.string("uname") else {
+            throw APIError.invalidResponse("当前用户信息为空")
+        }
+
+        let level = nav.data.dictionary("level_info")
+        let currentLevel = BiliFormat.intValue(level?["current_level"])
+
+        return BiliCurrentUser(
+            mid: mid,
+            name: BiliFormat.plainText(name),
+            faceURL: BiliFormat.normalizeURL(nav.data.string("face")),
+            levelText: currentLevel.map { "Lv.\($0)" },
+            coinsText: BiliFormat.countText(nav.data.raw["money"]),
+            followingText: BiliFormat.countText(stat.data.raw["following"]),
+            followersText: BiliFormat.countText(stat.data.raw["follower"])
+        )
+    }
+
+    func fetchUnreadState(session: BiliSession) async throws -> BiliUnreadState {
+        async let privateUnreadPayload = request(
+            baseURL: vcBaseURL,
+            path: "/session_svr/v1/session_svr/single_unread",
+            query: [
+                "build": "0",
+                "mobi_app": "web",
+                "unread_type": "0"
+            ],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        async let feedUnreadPayload = request(
+            path: "/x/msgfeed/unread",
+            query: [
+                "build": "0",
+                "mobi_app": "web",
+                "web_location": "333.1365"
+            ],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        async let dynamicUnreadPayload = request(
+            path: "/x/web-interface/dynamic/entrance",
+            query: [:],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let privateUnread = try await privateUnreadPayload
+        let feedUnread = try await feedUnreadPayload
+        let dynamicUnread = try await dynamicUnreadPayload
+
+        return BiliUnreadState(
+            privateUnread: BiliFormat.intValue(privateUnread.data.raw["unfollow_unread"] ?? privateUnread.data.raw["biz_msg_unfollow_unread"] ?? privateUnread.data.raw["unread_count"]) ?? 0,
+            dynamicUnread: BiliFormat.intValue(dynamicUnread.data.raw["dynamic_count"] ?? dynamicUnread.data.raw["up_num"] ?? dynamicUnread.data.raw["update_num"]) ?? 0,
+            replyUnread: BiliFormat.intValue(feedUnread.data.raw["reply"]) ?? 0,
+            atUnread: BiliFormat.intValue(feedUnread.data.raw["at"]) ?? 0,
+            likeUnread: BiliFormat.intValue(feedUnread.data.raw["like"]) ?? 0,
+            systemUnread: BiliFormat.intValue(feedUnread.data.raw["sys_msg"]) ?? 0
+        )
+    }
+
+    func fetchDynamicFeed(session: BiliSession, offset: String? = nil) async throws -> ([BiliDynamicPost], String?, Bool) {
+        var query: [String: String] = [
+            "type": "all",
+            "timezone_offset": "-480",
+            "features": dynamicFeatures
+        ]
+        if let offset, !offset.isEmpty {
+            query["offset"] = offset
+        }
+
+        let payload = try await request(
+            path: "/x/polymer/web-dynamic/v1/feed/all",
+            query: query,
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let posts = payload.data.array("items").compactMap(BiliDynamicPost.init(json:))
+        let nextOffset = payload.data.string("offset")
+        let hasMore = (payload.data.raw["has_more"] as? Bool) ?? !posts.isEmpty
+        return (posts, nextOffset, hasMore)
+    }
+
+    func fetchPrivateSessions(session: BiliSession) async throws -> [BiliPrivateSession] {
+        let payload = try await request(
+            baseURL: vcBaseURL,
+            path: "/session_svr/v1/session_svr/get_sessions",
+            query: try await signedQuery([
+                "session_type": "1",
+                "group_fold": "1",
+                "unfollow_fold": "0",
+                "sort_rule": "2",
+                "build": "0",
+                "mobi_app": "web"
+            ]),
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+
+        var sessionItems = payload.data.array("session_list")
+        if sessionItems.isEmpty, let direct = payload.data.raw["sessions"] as? [[String: Any]] {
+            sessionItems = direct
+        }
+        if sessionItems.isEmpty, let direct = payload.data.raw["session_list"] as? [[String: Any]] {
+            sessionItems = direct
+        }
+
+        let talkerIDs = Array(Set(sessionItems.compactMap { BiliFormat.intValue($0["talker_id"] ?? $0["talker_uid"] ?? $0["uid"]) }))
+        let userCards = try? await fetchPrivateUserCards(session: session, uids: talkerIDs)
+
+        return sessionItems.compactMap { BiliPrivateSession(json: $0, userCards: userCards ?? [:]) }
+            .sorted { ($0.lastTimestamp ?? 0) > ($1.lastTimestamp ?? 0) }
+    }
+
+    func fetchPrivateMessages(session: BiliSession, talkerID: Int, size: Int = 20) async throws -> [BiliPrivateMessage] {
+        let payload = try await request(
+            baseURL: vcBaseURL,
+            path: "/svr_sync/v1/svr_sync/fetch_session_msgs",
+            query: try await signedQuery([
+                "talker_id": "\(talkerID)",
+                "session_type": "1",
+                "size": "\(size)",
+                "sender_device_id": "1",
+                "build": "0",
+                "mobi_app": "web",
+                "web_location": "333.1296"
+            ]),
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+
+        var items = payload.data.array("messages")
+        if items.isEmpty, let direct = payload.data.raw["msgs"] as? [[String: Any]] {
+            items = direct
+        }
+        if items.isEmpty, let direct = payload.data.raw["messages"] as? [[String: Any]] {
+            items = direct
+        }
+
+        let selfMid = session.mid ?? 0
+        let messages = items.compactMap { BiliPrivateMessage(json: $0, selfMid: selfMid) }
+            .sorted { ($0.timestamp ?? 0) < ($1.timestamp ?? 0) }
+
+        if let maxSeqNo = items.compactMap({ BiliFormat.intValue($0["msg_seqno"] ?? $0["msg_key"]) }).max() {
+            try? await acknowledgeConversation(session: session, talkerID: talkerID, ackSeqNo: maxSeqNo)
+        }
+
+        return messages
+    }
+
+    func sendPrivateMessage(session: BiliSession, receiverID: Int, text: String) async throws {
+        guard let senderID = session.mid else {
+            throw APIError.invalidResponse("当前账号 UID 不可用")
+        }
+
+        let devID = AppPreferences.messageDeviceID
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let messagePayload: [String: Any] = [
+            "sender_uid": senderID,
+            "receiver_id": receiverID,
+            "receiver_type": 1,
+            "msg_type": 1,
+            "msg_status": 0,
+            "dev_id": devID,
+            "timestamp": timestamp,
+            "new_face_version": 1,
+            "content": ["content": text]
+        ]
+
+        let messageData = try JSONSerialization.data(withJSONObject: messagePayload)
+        guard let messageJSONString = String(data: messageData, encoding: .utf8) else {
+            throw APIError.invalidResponse("私信内容编码失败")
+        }
+
+        let body: [String: Any] = [
+            "msg": messageJSONString,
+            "from_firework": "0",
+            "build": "0",
+            "mobi_app": "web",
+            "csrf_token": session.csrf,
+            "csrf": session.csrf
+        ]
+
+        let signSource = try await signedQuery([
+            "msg": messageJSONString,
+            "from_firework": "0",
+            "build": "0",
+            "mobi_app": "web",
+            "csrf_token": session.csrf,
+            "csrf": session.csrf
+        ])
+
+        let _ = try await request(
+            baseURL: vcBaseURL,
+            path: "/web_im/v1/web_im/send_msg",
+            method: "POST",
+            query: [
+                "w_sender_uid": "\(senderID)",
+                "w_receiver_id": "\(receiverID)",
+                "w_dev_id": devID,
+                "w_rid": signSource["w_rid"] ?? "",
+                "wts": signSource["wts"] ?? ""
+            ],
+            body: body,
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+    }
+
+    func fetchDanmaku(cid: Int) async throws -> [BiliDanmakuItem] {
+        let url = URL(string: "https://comment.bilibili.com/\(cid).xml")!
+        let data = try await rawDataRequest(url: url, headers: ["User-Agent": Self.webUserAgent])
+        guard let xml = String(data: data, encoding: .utf8) else {
+            return []
+        }
+
+        let pattern = #"<d p="([^"]+)">([\s\S]*?)</d>"#
+        let regex = try NSRegularExpression(pattern: pattern, options: [])
+        let nsRange = NSRange(xml.startIndex..<xml.endIndex, in: xml)
+        let matches = regex.matches(in: xml, options: [], range: nsRange)
+
+        return matches.compactMap { match in
+            guard let paramRange = Range(match.range(at: 1), in: xml),
+                  let textRange = Range(match.range(at: 2), in: xml) else {
+                return nil
+            }
+
+            let params = xml[paramRange].split(separator: ",").map(String.init)
+            let time = Double(params[safe: 0] ?? "") ?? 0
+            let mode = Int(params[safe: 1] ?? "") ?? 1
+            let color = Int(params[safe: 3] ?? "") ?? 0xFFFFFF
+            let text = BiliFormat.decodeXMLEntities(String(xml[textRange]))
+
+            guard !text.isEmpty else { return nil }
+
+            return BiliDanmakuItem(
+                id: "\(time)-\(text.hashValue)",
+                time: time,
+                text: text,
+                mode: mode,
+                colorValue: color
+            )
+        }
+        .sorted { $0.time < $1.time }
+    }
+
+    func sendDanmaku(session: BiliSession, bvid: String, cid: Int, text: String, progressMS: Int) async throws {
+        let payload = try await request(
+            path: "/x/v2/dm/post",
+            method: "POST",
+            query: [:],
+            body: [
+                "type": "1",
+                "oid": "\(cid)",
+                "msg": text,
+                "mode": "1",
+                "bvid": bvid,
+                "progress": "\(progressMS)",
+                "color": "16777215",
+                "fontsize": "25",
+                "pool": "0",
+                "rnd": "\(Int(Date().timeIntervalSince1970 * 1_000_000))",
+                "csrf": session.csrf
+            ],
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://www.bilibili.com/video/\(bvid)")
+        )
+
+        guard payload.code == 0 else {
+            throw APIError.server(payload.message)
+        }
     }
 
     func fetchUserProfile(mid: Int) async throws -> BiliUserProfile {
@@ -285,18 +648,129 @@ actor BiliAPIClient {
         )
     }
 
+    private func fetchPrivateUserCards(session: BiliSession, uids: [Int]) async throws -> [Int: BiliUserCard] {
+        guard !uids.isEmpty else { return [:] }
+        let payload = try await request(
+            baseURL: vcBaseURL,
+            path: "/account/v1/user/cards",
+            query: [
+                "uids": uids.map(String.init).joined(separator: ","),
+                "build": "0",
+                "mobi_app": "web"
+            ],
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+
+        let cards: [[String: Any]]
+        if let direct = payload.data.raw["data"] as? [[String: Any]] {
+            cards = direct
+        } else {
+            cards = payload.data.array("data")
+        }
+
+        var result: [Int: BiliUserCard] = [:]
+        for card in cards {
+            guard let mid = BiliFormat.intValue(card["mid"] ?? card["uid"]) else { continue }
+            result[mid] = BiliUserCard(
+                mid: mid,
+                name: BiliFormat.plainText(card.string("name") ?? card.string("uname") ?? "用户 \(mid)"),
+                faceURL: BiliFormat.normalizeURL(card.string("face") ?? card.string("face_url"))
+            )
+        }
+        return result
+    }
+
+    private func acknowledgeConversation(session: BiliSession, talkerID: Int, ackSeqNo: Int) async throws {
+        let _ = try await request(
+            baseURL: vcBaseURL,
+            path: "/session_svr/v1/session_svr/update_ack",
+            query: try await signedQuery([
+                "talker_id": "\(talkerID)",
+                "session_type": "1",
+                "ack_seqno": "\(ackSeqNo)",
+                "build": "0",
+                "mobi_app": "web",
+                "csrf_token": session.csrf,
+                "csrf": session.csrf
+            ]),
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+    }
+
+    private var tvHeaders: [String: String] {
+        [
+            "buvid": "XY\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))",
+            "env": "prod",
+            "app-key": "android_hd",
+            "User-Agent": Self.appUserAgent,
+            "x-bili-trace-id": appTraceID,
+            "x-bili-aurora-eid": "",
+            "x-bili-aurora-zone": "",
+            "bili-http-engine": "cronet",
+            "content-type": "application/x-www-form-urlencoded; charset=utf-8"
+        ]
+    }
+
+    private func authenticatedHeaders(session: BiliSession, referer: String = "https://www.bilibili.com") -> [String: String] {
+        [
+            "User-Agent": Self.webUserAgent,
+            "Cookie": session.cookieHeader,
+            "Referer": referer,
+            "Origin": "https://www.bilibili.com"
+        ]
+    }
+
     private func request(
         path: String,
+        method: String = "GET",
         query: [String: String],
+        body: [String: Any]? = nil,
+        contentType: RequestContentType = .json,
         headers: [String: String] = [:]
     ) async throws -> APIEnvelope {
-        try await request(baseURL: apiBaseURL, path: path, query: query, headers: headers)
+        try await request(
+            baseURL: apiBaseURL,
+            path: path,
+            method: method,
+            query: query,
+            body: body,
+            contentType: contentType,
+            headers: headers
+        )
     }
 
     private func request(
         baseURL: URL,
         path: String,
+        method: String = "GET",
         query: [String: String],
+        body: [String: Any]? = nil,
+        contentType: RequestContentType = .json,
+        headers: [String: String] = [:]
+    ) async throws -> APIEnvelope {
+        let envelope = try await rawRequest(
+            baseURL: baseURL,
+            path: path,
+            method: method,
+            query: query,
+            body: body,
+            contentType: contentType,
+            headers: headers
+        )
+
+        guard envelope.code == 0 else {
+            throw APIError.server(envelope.message.isEmpty ? "接口返回失败" : envelope.message)
+        }
+        return envelope
+    }
+
+    private func rawRequest(
+        baseURL: URL,
+        path: String,
+        method: String = "GET",
+        query: [String: String],
+        body: [String: Any]? = nil,
+        contentType: RequestContentType = .json,
         headers: [String: String] = [:]
     ) async throws -> APIEnvelope {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
@@ -308,12 +782,23 @@ actor BiliAPIClient {
         }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.httpMethod = method
+        request.timeoutInterval = 20
+        request.setValue(Self.webUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
-        request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        if let body {
+            switch contentType {
+            case .json:
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            case .form:
+                request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+                request.httpBody = formEncoded(body).data(using: .utf8)
+            }
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -327,12 +812,21 @@ actor BiliAPIClient {
             throw APIError.invalidResponse("接口未返回 JSON 对象")
         }
 
-        let envelope = APIEnvelope(json: json)
-        guard envelope.code == 0 else {
-            throw APIError.server(envelope.message.isEmpty ? "接口返回失败" : envelope.message)
+        return APIEnvelope(json: json)
+    }
+
+    private func rawDataRequest(url: URL, headers: [String: String]) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
         }
 
-        return envelope
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
+            throw APIError.http("原始数据请求失败")
+        }
+        return data
     }
 
     private func signedQuery(_ query: [String: String]) async throws -> [String: String] {
@@ -344,6 +838,17 @@ actor BiliAPIClient {
             return "\(Self.percentEncode(key))=\(Self.percentEncode(sanitized))"
         }.joined(separator: "&")
         result["w_rid"] = Self.md5("\(sortedQuery)\(mixinKey)")
+        return result
+    }
+
+    private func appSignedParameters(_ query: [String: String]) -> [String: String] {
+        var result = query
+        result["appkey"] = appKey
+        result["ts"] = "\(Int(Date().timeIntervalSince1970))"
+        let queryString = result.keys.sorted().map { key in
+            "\(Self.percentEncode(key))=\(Self.percentEncode(result[key] ?? ""))"
+        }.joined(separator: "&")
+        result["sign"] = Self.md5(queryString + appSecret)
         return result
     }
 
@@ -373,6 +878,28 @@ actor BiliAPIClient {
         return key
     }
 
+    private func formEncoded(_ body: [String: Any]) -> String {
+        body.map { key, value in
+            let stringValue: String
+            switch value {
+            case let value as String:
+                stringValue = value
+            case let value as NSNumber:
+                stringValue = value.stringValue
+            default:
+                if let data = try? JSONSerialization.data(withJSONObject: value),
+                   let json = String(data: data, encoding: .utf8) {
+                    stringValue = json
+                } else {
+                    stringValue = "\(value)"
+                }
+            }
+            return "\(Self.percentEncode(key))=\(Self.percentEncode(stringValue))"
+        }
+        .sorted()
+        .joined(separator: "&")
+    }
+
     private static func fileStem(from urlString: String?) -> String {
         guard let urlString, let url = URL(string: urlString) else { return "" }
         return url.deletingPathExtension().lastPathComponent
@@ -388,6 +915,11 @@ actor BiliAPIClient {
         allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
         return string.addingPercentEncoding(withAllowedCharacters: allowed) ?? string
     }
+}
+
+private enum RequestContentType {
+    case json
+    case form
 }
 
 private struct APIEnvelope {

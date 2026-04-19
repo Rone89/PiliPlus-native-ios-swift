@@ -2,13 +2,16 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
+    @EnvironmentObject private var authStore: AuthStore
+
     @State private var showClearHistoryConfirmation = false
     @State private var showClearFavoritesConfirmation = false
     @State private var playbackRate = AppPreferences.playbackRate
     @State private var autoPlayNext = AppPreferences.autoPlayNext
+    @State private var showDanmaku = AppPreferences.showDanmaku
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.1"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
         return "\(shortVersion) (\(build))"
     }
@@ -18,7 +21,29 @@ struct SettingsView: View {
             Section("关于") {
                 LabeledContent("应用版本", value: versionText)
                 LabeledContent("实现方式", value: "SwiftUI + URLSession + XcodeGen")
-                LabeledContent("当前定位", value: "原生 iOS 可用版")
+                LabeledContent("当前定位", value: "原生 iOS 持续增强版")
+            }
+
+            Section("账号") {
+                LabeledContent("登录状态", value: authStore.isLoggedIn ? "已登录" : "未登录")
+                if let user = authStore.currentUser {
+                    LabeledContent("当前账号", value: user.name)
+                    LabeledContent("UID", value: "\(user.mid)")
+                }
+
+                if authStore.isLoggedIn {
+                    Button("同步个人中心") {
+                        Task {
+                            await authStore.sync()
+                        }
+                    }
+
+                    Button("退出登录", role: .destructive) {
+                        Task {
+                            await authStore.logout()
+                        }
+                    }
+                }
             }
 
             Section("本地数据") {
@@ -38,6 +63,7 @@ struct SettingsView: View {
 
             Section("播放") {
                 Toggle("自动播放下一 P", isOn: $autoPlayNext)
+                Toggle("默认显示弹幕", isOn: $showDanmaku)
 
                 Picker("默认倍速", selection: $playbackRate) {
                     Text("0.75x").tag(0.75)
@@ -49,11 +75,11 @@ struct SettingsView: View {
             }
 
             Section("当前已支持") {
-                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、视频详情、评论区与回复、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
+                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、个人中心同步、动态、私信会话只读、视频详情、评论区与回复、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
             }
 
             Section("后续可继续补完") {
-                Text("登录、动态、私信、弹幕、缓存下载、账号同步等功能可以继续在当前原生架构上扩展。")
+                Text("私信发送完整闭环、动态发布/互动、账号多实例同步、离线缓存、更多弹幕交互和消息中心细分等功能，可以继续在当前原生架构上扩展。")
             }
 
             Section("相关链接") {
@@ -68,6 +94,9 @@ struct SettingsView: View {
         }
         .onChange(of: autoPlayNext) { _, newValue in
             AppPreferences.autoPlayNext = newValue
+        }
+        .onChange(of: showDanmaku) { _, newValue in
+            AppPreferences.showDanmaku = newValue
         }
         .confirmationDialog("确认清空全部历史记录？", isPresented: $showClearHistoryConfirmation) {
             Button("清空历史", role: .destructive) {

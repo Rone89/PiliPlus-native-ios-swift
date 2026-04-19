@@ -1,21 +1,32 @@
 import SwiftUI
 
 struct RootTabView: View {
+    @EnvironmentObject private var authStore: AuthStore
+
     var body: some View {
         TabView {
             NavigationStack {
-                VideoFeedView(kind: .recommend)
+                HomeHubView()
             }
             .tabItem {
-                Label("推荐", systemImage: "sparkles.tv")
+                Label("首页", systemImage: "house")
             }
 
             NavigationStack {
-                VideoFeedView(kind: .popular)
+                DynamicFeedView()
             }
             .tabItem {
-                Label("热门", systemImage: "flame")
+                Label("动态", systemImage: "dot.radiowaves.left.and.right")
             }
+            .badge(authStore.unreadState.dynamicUnread == 0 ? nil : authStore.unreadState.dynamicUnread)
+
+            NavigationStack {
+                MessagesView()
+            }
+            .tabItem {
+                Label("私信", systemImage: "bubble.left.and.bubble.right")
+            }
+            .badge(authStore.unreadState.privateUnread == 0 ? nil : authStore.unreadState.privateUnread)
 
             NavigationStack {
                 SearchView()

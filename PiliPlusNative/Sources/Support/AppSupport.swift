@@ -10,6 +10,8 @@ enum AppPreferences {
     private static let defaults = UserDefaults.standard
     private static let playbackRateKey = "preference_playback_rate"
     private static let autoPlayNextKey = "preference_auto_play_next"
+    private static let showDanmakuKey = "preference_show_danmaku"
+    private static let messageDeviceIDKey = "preference_message_device_id"
 
     static var playbackRate: Double {
         get {
@@ -32,11 +34,39 @@ enum AppPreferences {
             defaults.set(newValue, forKey: autoPlayNextKey)
         }
     }
+
+    static var showDanmaku: Bool {
+        get {
+            if defaults.object(forKey: showDanmakuKey) == nil {
+                return true
+            }
+            return defaults.bool(forKey: showDanmakuKey)
+        }
+        set {
+            defaults.set(newValue, forKey: showDanmakuKey)
+        }
+    }
+
+    static var messageDeviceID: String {
+        get {
+            if let existing = defaults.string(forKey: messageDeviceIDKey), !existing.isEmpty {
+                return existing
+            }
+            let generated = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            defaults.set(generated, forKey: messageDeviceIDKey)
+            return generated
+        }
+        set {
+            defaults.set(newValue, forKey: messageDeviceIDKey)
+        }
+    }
 }
 
-enum FeedKind: String {
+enum FeedKind: String, CaseIterable, Identifiable {
     case recommend
     case popular
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -144,6 +174,15 @@ enum BiliFormat {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func decodeXMLEntities(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+    }
+
     static func relativeDate(_ timestamp: Int?) -> String? {
         guard let timestamp, timestamp > 0 else { return nil }
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
@@ -167,6 +206,14 @@ enum BiliFormat {
             return URL(string: "https:\(value)")
         }
         return URL(string: value)
+    }
+
+    static func color(from decimal: Int?) -> Color {
+        let value = decimal ?? 0xFFFFFF
+        let red = Double((value >> 16) & 0xFF) / 255.0
+        let green = Double((value >> 8) & 0xFF) / 255.0
+        let blue = Double(value & 0xFF) / 255.0
+        return Color(red: red, green: green, blue: blue)
     }
 
     static func intValue(_ value: Any?) -> Int? {

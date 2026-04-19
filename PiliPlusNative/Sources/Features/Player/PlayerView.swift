@@ -7,9 +7,15 @@ final class PlayerViewModel: ObservableObject {
     @Published private(set) var playback: BiliPlayback?
     @Published private(set) var isLoading = false
     @Published private(set) var currentSeconds = 0.0
+    @Published private(set) var danmakuItems: [BiliDanmakuItem] = []
+    @Published private(set) var activeDanmaku: [ActiveDanmakuItem] = []
+    @Published private(set) var isSendingDanmaku = false
     @Published var errorMessage: String?
+    @Published var danmakuError: String?
+    @Published var danmakuInput = ""
     @Published var selectedPageIndex: Int
     @Published var playbackRate = AppPreferences.playbackRate
+    @Published var showDanmaku = AppPreferences.showDanmaku
 
     let detail: BiliVideoDetail
     let player = AVPlayer()
@@ -19,6 +25,10 @@ final class PlayerViewModel: ObservableObject {
     private weak var libraryStore: LibraryStore?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var nextDanmakuIndex = 0
+    private var nextDanmakuLane = 0
+    private var lastObservedSeconds = 0.0
+    private var lastPersistedSeconds = 0.0
 
     init(detail: BiliVideoDetail, initialPageIndex: Int, startAtSeconds: Double? = nil) {
         self.detail = detail
@@ -54,14 +64,27 @@ final class PlayerViewModel: ObservableObject {
         guard let page = currentPage else { return }
         isLoading = true
         errorMessage = nil
+        danmakuError = nil
+        activeDanmaku = []
+        danmakuItems = []
+        nextDanmakuIndex = 0
+        nextDanmakuLane = 0
+        lastObservedSeconds = 0
+        lastPersistedSeconds = 0
         defer { isLoading = false }
 
         do {
-            let playback = try await BiliAPIClient.shared.fetchPlayback(bvid: detail.video.bvid, cid: page.cid)
+            async let playbackTask = BiliAPIClient.shared.fetchPlayback(bvid: detail.video.bvid, cid: page.cid)
+            async let danmakuTask = BiliAPIClient.shared.fetchDanmaku(cid: page.cid)
+
+            let playback = try await playbackTask
             self.playback = playback
             let resumeProgress = resumeProgress(for: page)
             currentSeconds = resumeProgress ?? 0
+            lastPersistedSeconds = resumeProgress ?? 0
             configurePlayer(with: playback.streamURL, startAtSeconds: resumeProgress)
+            danmakuItems = (try? await danmakuTask) ?? []
+
             libraryStore?.updateWatchRecord(video: detail.video, page: page, progressSeconds: resumeProgress ?? 0)
         } catch {
             errorMessage = error.localizedDescription
@@ -93,12 +116,48 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    func setShowDanmaku(_ enabled: Bool) {
+        showDanmaku = enabled
+        AppPreferences.showDanmaku = enabled
+        if !enabled {
+            activeDanmaku.removeAll()
+        }
+    }
+
     func persistCurrentProgress() {
         guard let page = currentPage else { return }
         let seconds = player.currentTime().seconds
         guard seconds.isFinite, seconds >= 0 else { return }
         currentSeconds = seconds
+        lastPersistedSeconds = seconds
         libraryStore?.updateWatchRecord(video: detail.video, page: page, progressSeconds: seconds)
+    }
+
+    func sendDanmaku(session: BiliSession?) async {
+        guard let page = currentPage else { return }
+        guard let session, session.isLoggedIn else {
+            danmakuError = "请先登录后发送弹幕"
+            return
+        }
+        let text = danmakuInput.trimmed
+        guard !text.isEmpty else { return }
+
+        isSendingDanmaku = true
+        danmakuError = nil
+        defer { isSendingDanmaku = false }
+
+        do {
+            try await BiliAPIClient.shared.sendDanmaku(
+                session: session,
+                bvid: detail.video.bvid,
+                cid: page.cid,
+                text: text,
+                progressMS: Int(max(currentSeconds, 0) * 1000)
+            )
+            danmakuInput = ""
+        } catch {
+            danmakuError = error.localizedDescription
+        }
     }
 
     private func resumeProgress(for page: BiliVideoPage) -> Double? {
@@ -113,7 +172,7 @@ final class PlayerViewModel: ObservableObject {
             "AVURLAssetHTTPHeaderFieldsKey": [
                 "Referer": "https://www.bilibili.com/video/\(detail.video.bvid)",
                 "Origin": "https://www.bilibili.com",
-                "User-Agent": BiliAPIClient.userAgent
+                "User-Agent": BiliAPIClient.webUserAgent
             ]
         ]
         let asset = AVURLAsset(url: url, options: options)
@@ -135,15 +194,12 @@ final class PlayerViewModel: ObservableObject {
 
     private func configureTimeObserver() {
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 5, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let seconds = time.seconds
-                guard seconds.isFinite, seconds >= 0, let page = self.currentPage else { return }
-                self.currentSeconds = seconds
-                self.libraryStore?.updateWatchRecord(video: self.detail.video, page: page, progressSeconds: seconds)
+                self.handleTimeUpdate(seconds: time.seconds)
             }
         }
     }
@@ -163,6 +219,44 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    private func handleTimeUpdate(seconds: Double) {
+        guard seconds.isFinite, seconds >= 0 else { return }
+
+        if seconds + 1 < lastObservedSeconds {
+            resetDanmakuCursor(for: seconds)
+        }
+
+        currentSeconds = seconds
+        lastObservedSeconds = seconds
+
+        if seconds - lastPersistedSeconds >= 5 {
+            persistCurrentProgress()
+        }
+
+        guard showDanmaku else { return }
+
+        while nextDanmakuIndex < danmakuItems.count, danmakuItems[nextDanmakuIndex].time <= seconds {
+            emitDanmaku(danmakuItems[nextDanmakuIndex])
+            nextDanmakuIndex += 1
+        }
+    }
+
+    private func emitDanmaku(_ item: BiliDanmakuItem) {
+        let active = ActiveDanmakuItem(item: item, lane: nextDanmakuLane)
+        nextDanmakuLane = (nextDanmakuLane + 1) % 6
+        activeDanmaku.append(active)
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            self?.activeDanmaku.removeAll { $0.id == active.id }
+        }
+    }
+
+    private func resetDanmakuCursor(for seconds: Double) {
+        nextDanmakuIndex = danmakuItems.firstIndex(where: { $0.time >= seconds }) ?? danmakuItems.count
+        activeDanmaku.removeAll()
+    }
+
     func tearDown() {
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -178,6 +272,7 @@ final class PlayerViewModel: ObservableObject {
 
 struct PlayerView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
+    @EnvironmentObject private var authStore: AuthStore
 
     @StateObject private var viewModel: PlayerViewModel
 
@@ -188,9 +283,17 @@ struct PlayerView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                VideoPlayer(player: viewModel.player)
-                    .frame(height: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                ZStack {
+                    VideoPlayer(player: viewModel.player)
+                        .frame(height: 240)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+                    if viewModel.showDanmaku {
+                        DanmakuOverlayView(items: viewModel.activeDanmaku)
+                            .frame(height: 240)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(viewModel.detail.video.title)
@@ -222,6 +325,7 @@ struct PlayerView: View {
                 }
 
                 playbackControls
+                danmakuControls
 
                 if !viewModel.detail.pages.isEmpty {
                     pageSwitcher
@@ -303,6 +407,52 @@ struct PlayerView: View {
             .pickerStyle(.segmented)
             .onChange(of: viewModel.playbackRate) { _, newValue in
                 viewModel.setPlaybackRate(newValue)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var danmakuControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("弹幕")
+                    .font(.headline)
+                Spacer()
+                Toggle("显示弹幕", isOn: Binding(
+                    get: { viewModel.showDanmaku },
+                    set: { viewModel.setShowDanmaku($0) }
+                ))
+                .labelsHidden()
+            }
+
+            HStack(spacing: 10) {
+                TextField("发送弹幕", text: $viewModel.danmakuInput)
+                    .textFieldStyle(.roundedBorder)
+
+                Button {
+                    Task {
+                        await viewModel.sendDanmaku(session: authStore.session)
+                    }
+                } label: {
+                    if viewModel.isSendingDanmaku {
+                        ProgressView()
+                    } else {
+                        Text("发送")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.danmakuInput.trimmed.isEmpty)
+            }
+
+            if let danmakuError = viewModel.danmakuError {
+                Text(danmakuError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(authStore.isLoggedIn ? "已登录，可发送普通弹幕。" : "登录后可发送弹幕，未登录时仍可查看弹幕。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
