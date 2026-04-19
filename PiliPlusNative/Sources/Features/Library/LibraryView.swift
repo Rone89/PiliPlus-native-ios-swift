@@ -123,78 +123,97 @@ struct LibraryView: View {
     @ViewBuilder
     private var accountSection: some View {
         Section(authStore.isLoggedIn ? "账号" : "登录") {
-            if authStore.isLoggedIn, let user = authStore.currentUser {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 14) {
-                        AsyncImage(url: user.faceURL) { phase in
-                            switch phase {
-                            case let .success(image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            case .failure:
-                                Circle().fill(.quaternary)
-                            case .empty:
-                                Circle().fill(.quaternary).overlay(ProgressView())
-                            @unknown default:
-                                Circle().fill(.quaternary)
+            if authStore.isLoggedIn {
+                if let user = authStore.currentUser {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 14) {
+                            AsyncImage(url: user.faceURL) { phase in
+                                switch phase {
+                                case let .success(image):
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                case .failure:
+                                    Circle().fill(.quaternary)
+                                case .empty:
+                                    Circle().fill(.quaternary).overlay(ProgressView())
+                                @unknown default:
+                                    Circle().fill(.quaternary)
+                                }
                             }
-                        }
-                        .frame(width: 64, height: 64)
-                        .clipShape(Circle())
+                            .frame(width: 64, height: 64)
+                            .clipShape(Circle())
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(user.name)
-                                .font(.title3.bold())
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(user.name)
+                                    .font(.title3.bold())
 
-                            Text("UID \(user.mid)")
-                                .font(.caption.monospaced())
+                                Text("UID \(user.mid)")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+
+                                HStack(spacing: 10) {
+                                    if let levelText = user.levelText {
+                                        Label(levelText, systemImage: "star.circle")
+                                    }
+                                    if let coinsText = user.coinsText {
+                                        Label(coinsText, systemImage: "bitcoinsign.circle")
+                                    }
+                                }
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-
-                            HStack(spacing: 10) {
-                                if let levelText = user.levelText {
-                                    Label(levelText, systemImage: "star.circle")
-                                }
-                                if let coinsText = user.coinsText {
-                                    Label(coinsText, systemImage: "bitcoinsign.circle")
-                                }
                             }
-                            .font(.caption)
+                        }
+
+                        HStack(spacing: 12) {
+                            if let following = user.followingText {
+                                Label(following, systemImage: "person.badge.plus")
+                            }
+                            if let followers = user.followersText {
+                                Label(followers, systemImage: "person.2")
+                            }
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                        HStack(spacing: 12) {
+                            Label("\(authStore.unreadState.dynamicUnread)", systemImage: "dot.radiowaves.left.and.right")
+                            Label("\(authStore.unreadState.privateUnread)", systemImage: "bubble.left.and.bubble.right")
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                        Button {
+                            Task {
+                                await authStore.sync()
+                            }
+                        } label: {
+                            Label("同步个人中心", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("账号已登录，正在同步个人中心信息。")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        }
-                    }
 
-                    HStack(spacing: 12) {
-                        if let following = user.followingText {
-                            Label(following, systemImage: "person.badge.plus")
+                        Button {
+                            Task {
+                                await authStore.sync()
+                            }
+                        } label: {
+                            Label("重新同步", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
                         }
-                        if let followers = user.followersText {
-                            Label(followers, systemImage: "person.2")
-                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                    HStack(spacing: 12) {
-                        Label("\(authStore.unreadState.dynamicUnread)", systemImage: "dot.radiowaves.left.and.right")
-                        Label("\(authStore.unreadState.privateUnread)", systemImage: "bubble.left.and.bubble.right")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                    Button {
-                        Task {
-                            await authStore.sync()
-                        }
-                    } label: {
-                        Label("同步个人中心", systemImage: "arrow.clockwise")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     Text("扫码登录后可同步个人中心、动态、私信未读、弹幕发送等功能。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -203,23 +222,6 @@ struct LibraryView: View {
                         showLoginSheet = true
                     } label: {
                         Label("扫码登录", systemImage: "qrcode")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(.vertical, 8)
-            } else if authStore.isLoggedIn {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("账号已登录，正在同步个人中心信息。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    Button {
-                        Task {
-                            await authStore.sync()
-                        }
-                    } label: {
-                        Label("重新同步", systemImage: "arrow.clockwise")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

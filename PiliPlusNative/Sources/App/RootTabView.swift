@@ -12,21 +12,43 @@ struct RootTabView: View {
                 Label("首页", systemImage: "house")
             }
 
-            NavigationStack {
-                DynamicFeedView()
+            Group {
+                if authStore.unreadState.dynamicUnread > 0 {
+                    NavigationStack {
+                        DynamicFeedView()
+                    }
+                    .tabItem {
+                        Label("动态", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    .badge(authStore.unreadState.dynamicUnread)
+                } else {
+                    NavigationStack {
+                        DynamicFeedView()
+                    }
+                    .tabItem {
+                        Label("动态", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                }
             }
-            .tabItem {
-                Label("动态", systemImage: "dot.radiowaves.left.and.right")
-            }
-            .badge(authStore.unreadState.dynamicUnread == 0 ? nil : authStore.unreadState.dynamicUnread)
 
-            NavigationStack {
-                MessagesView()
+            Group {
+                if authStore.unreadState.privateUnread > 0 {
+                    NavigationStack {
+                        MessagesView()
+                    }
+                    .tabItem {
+                        Label("私信", systemImage: "bubble.left.and.bubble.right")
+                    }
+                    .badge(authStore.unreadState.privateUnread)
+                } else {
+                    NavigationStack {
+                        MessagesView()
+                    }
+                    .tabItem {
+                        Label("私信", systemImage: "bubble.left.and.bubble.right")
+                    }
+                }
             }
-            .tabItem {
-                Label("私信", systemImage: "bubble.left.and.bubble.right")
-            }
-            .badge(authStore.unreadState.privateUnread == 0 ? nil : authStore.unreadState.privateUnread)
 
             NavigationStack {
                 SearchView()
