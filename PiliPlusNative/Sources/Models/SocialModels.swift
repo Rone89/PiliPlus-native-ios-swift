@@ -76,6 +76,47 @@ struct BiliUnreadState: Codable, Hashable {
     )
 }
 
+enum BiliNotificationKind: String, Codable, Hashable, CaseIterable, Identifiable {
+    case reply
+    case mention
+    case like
+    case system
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .reply:
+            return "回复我的"
+        case .mention:
+            return "@ 我的"
+        case .like:
+            return "收到的赞"
+        case .system:
+            return "系统通知"
+        }
+    }
+}
+
+struct BiliNotificationItem: Identifiable, Hashable {
+    let id: String
+    let kind: BiliNotificationKind
+    let userMid: Int?
+    let title: String
+    let subtitle: String
+    let detail: String?
+    let avatarURL: URL?
+    let imageURL: URL?
+    let timestamp: Int?
+    let rawCursor: Int?
+}
+
+struct BiliNotificationPage {
+    let items: [BiliNotificationItem]
+    let nextCursor: Int?
+    let nextCursorTime: Int?
+}
+
 struct QRCodeLoginInfo: Hashable {
     let authCode: String
     let url: String
@@ -171,12 +212,17 @@ struct BiliDynamicPost: Identifiable, Hashable {
     }
 }
 
+struct BiliComposeDynamicResult: Hashable {
+    let dynamicID: String?
+}
+
 struct BiliPrivateSession: Identifiable, Hashable {
     let talkerID: Int
     let name: String
     let avatarURL: URL?
     let previewText: String
     let unreadCount: Int
+    let isPinned: Bool
     let lastTimestamp: Int?
     let maxSeqNo: Int?
     let ackSeqNo: Int?
@@ -210,6 +256,7 @@ struct BiliPrivateSession: Identifiable, Hashable {
         )
         self.previewText = previewText
         self.unreadCount = BiliFormat.intValue(json["unread_count"]) ?? 0
+        self.isPinned = (json["is_pinned"] as? Bool) ?? (BiliFormat.intValue(json["is_pinned"] ?? json["is_top"]) == 1)
         self.lastTimestamp = BiliFormat.intValue(json["session_ts"] ?? json["timestamp"])
         self.maxSeqNo = BiliFormat.intValue(json["max_seqno"])
         self.ackSeqNo = BiliFormat.intValue(json["ack_seqno"])

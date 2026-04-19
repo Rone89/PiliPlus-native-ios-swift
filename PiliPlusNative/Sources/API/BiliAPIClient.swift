@@ -289,6 +289,185 @@ actor BiliAPIClient {
         return (posts, nextOffset, hasMore)
     }
 
+    func createTextDynamic(session: BiliSession, text: String) async throws -> BiliComposeDynamicResult {
+        let payload = try await request(
+            baseURL: vcBaseURL,
+            path: "/dynamic_svr/v1/dynamic_svr/create",
+            method: "POST",
+            query: [:],
+            body: [
+                "dynamic_id": "0",
+                "type": "4",
+                "rid": "0",
+                "content": text,
+                "csrf_token": session.csrf,
+                "csrf": session.csrf
+            ],
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://t.bilibili.com/")
+        )
+
+        return BiliComposeDynamicResult(dynamicID: payload.data.string("dynamic_id") ?? payload.data.string("dyn_id_str"))
+    }
+
+    func fetchReplyNotifications(session: BiliSession, cursor: Int? = nil, cursorTime: Int? = nil) async throws -> BiliNotificationPage {
+        let payload = try await request(
+            path: "/x/msgfeed/reply",
+            query: compactQuery([
+                "id": cursor.map(String.init),
+                "reply_time": cursorTime.map(String.init),
+                "platform": "web",
+                "mobi_app": "web",
+                "build": "0",
+                "web_location": "333.40164"
+            ]),
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let items = payload.data.array("items").compactMap { item -> BiliNotificationItem? in
+            let user = item.dictionary("user")
+            let content = item.dictionary("item")
+            let name = BiliFormat.plainText(user?.string("nickname") ?? "有人回复了你")
+            let detail = BiliFormat.plainText(
+                content?.string("target_reply_content") ??
+                content?.string("root_reply_content") ??
+                content?.string("source_content")
+            )
+            return BiliNotificationItem(
+                id: "\(BiliFormat.intValue(item["id"]) ?? Int.random(in: 1...999999))",
+                kind: .reply,
+                userMid: BiliFormat.intValue(user?["mid"]),
+                title: name,
+                subtitle: detail.isEmpty ? "回复了你" : detail,
+                detail: BiliFormat.plainText(content?.string("source_content")),
+                avatarURL: BiliFormat.normalizeURL(user?.string("avatar")),
+                imageURL: nil,
+                timestamp: BiliFormat.intValue(item["reply_time"]),
+                rawCursor: BiliFormat.intValue(item["id"])
+            )
+        }
+
+        return BiliNotificationPage(
+            items: items,
+            nextCursor: BiliFormat.intValue(payload.data.dictionary("cursor")?["id"]),
+            nextCursorTime: BiliFormat.intValue(payload.data.dictionary("cursor")?["time"])
+        )
+    }
+
+    func fetchMentionNotifications(session: BiliSession, cursor: Int? = nil, cursorTime: Int? = nil) async throws -> BiliNotificationPage {
+        let payload = try await request(
+            path: "/x/msgfeed/at",
+            query: compactQuery([
+                "id": cursor.map(String.init),
+                "at_time": cursorTime.map(String.init),
+                "platform": "web",
+                "mobi_app": "web",
+                "build": "0",
+                "web_location": "333.40164"
+            ]),
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let items = payload.data.array("items").compactMap { item -> BiliNotificationItem? in
+            let user = item.dictionary("user")
+            let content = item.dictionary("item")
+            let name = BiliFormat.plainText(user?.string("nickname") ?? "有人提到了你")
+            let subtitle = BiliFormat.plainText(content?.string("source_content"))
+            return BiliNotificationItem(
+                id: "\(BiliFormat.intValue(item["id"]) ?? Int.random(in: 1...999999))",
+                kind: .mention,
+                userMid: BiliFormat.intValue(user?["mid"]),
+                title: name,
+                subtitle: subtitle.isEmpty ? "@ 了你" : subtitle,
+                detail: nil,
+                avatarURL: BiliFormat.normalizeURL(user?.string("avatar")),
+                imageURL: BiliFormat.normalizeURL(content?.string("image")),
+                timestamp: BiliFormat.intValue(item["at_time"]),
+                rawCursor: BiliFormat.intValue(item["id"])
+            )
+        }
+
+        return BiliNotificationPage(
+            items: items,
+            nextCursor: BiliFormat.intValue(payload.data.dictionary("cursor")?["id"]),
+            nextCursorTime: BiliFormat.intValue(payload.data.dictionary("cursor")?["time"])
+        )
+    }
+
+    func fetchLikeNotifications(session: BiliSession) async throws -> BiliNotificationPage {
+        let payload = try await request(
+            path: "/x/msgfeed/like",
+            query: [
+                "platform": "web",
+                "mobi_app": "web",
+                "build": "0",
+                "web_location": "333.40164"
+            ],
+            headers: authenticatedHeaders(session: session)
+        )
+
+        let items = (payload.data.dictionary("latest")?.array("items") ?? []).compactMap { item -> BiliNotificationItem? in
+            let users = item["users"] as? [[String: Any]] ?? []
+            let content = item.dictionary("item")
+            let names = users.compactMap { BiliFormat.plainText($0.string("nickname")) }.filter { !$0.isEmpty }
+            let title = names.isEmpty ? "有人赞了你" : names.joined(separator: "、")
+            let subtitle = BiliFormat.plainText(content?.string("title"))
+            let avatarURL = BiliFormat.normalizeURL(users.first?.string("avatar"))
+            let imageURL = BiliFormat.normalizeURL(content?.string("image"))
+            return BiliNotificationItem(
+                id: "\(BiliFormat.intValue(item["id"]) ?? Int.random(in: 1...999999))",
+                kind: .like,
+                userMid: nil,
+                title: title,
+                subtitle: subtitle.isEmpty ? "赞了你的内容" : subtitle,
+                detail: nil,
+                avatarURL: avatarURL,
+                imageURL: imageURL,
+                timestamp: BiliFormat.intValue(item["like_time"]),
+                rawCursor: nil
+            )
+        }
+
+        return BiliNotificationPage(items: items, nextCursor: nil, nextCursorTime: nil)
+    }
+
+    func fetchSystemNotifications(session: BiliSession, cursor: Int? = nil) async throws -> BiliNotificationPage {
+        let payload = try await request(
+            baseURL: messageBaseURL,
+            path: "/x/sys-msg/query_notify_list",
+            query: compactQuery([
+                "cursor": cursor.map(String.init),
+                "page_size": "20",
+                "mobi_app": "web",
+                "build": "0",
+                "web_location": "333.40164"
+            ]),
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+
+        let items = payload.dataList.compactMap { item -> BiliNotificationItem? in
+            let rawContent = BiliFormat.plainText(item.string("content"))
+            return BiliNotificationItem(
+                id: "\(BiliFormat.intValue(item["id"]) ?? Int.random(in: 1...999999))",
+                kind: .system,
+                userMid: nil,
+                title: BiliFormat.plainText(item.string("title") ?? "系统通知"),
+                subtitle: rawContent,
+                detail: nil,
+                avatarURL: nil,
+                imageURL: nil,
+                timestamp: nil,
+                rawCursor: BiliFormat.intValue(item["cursor"])
+            )
+        }
+
+        return BiliNotificationPage(
+            items: items,
+            nextCursor: items.last?.rawCursor,
+            nextCursorTime: nil
+        )
+    }
+
     func fetchPrivateSessions(session: BiliSession) async throws -> [BiliPrivateSession] {
         let payload = try await request(
             baseURL: vcBaseURL,
@@ -408,6 +587,50 @@ actor BiliAPIClient {
                 "wts": signSource["wts"] ?? ""
             ],
             body: body,
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+    }
+
+    func setConversationPinned(session: BiliSession, talkerID: Int, pinned: Bool) async throws {
+        let opType = pinned ? "0" : "1"
+        let signed = try await signedQuery([
+            "talker_id": "\(talkerID)",
+            "session_type": "1",
+            "op_type": opType,
+            "build": "0",
+            "mobi_app": "web",
+            "csrf_token": session.csrf,
+            "csrf": session.csrf
+        ])
+
+        let _ = try await request(
+            baseURL: vcBaseURL,
+            path: "/session_svr/v1/session_svr/set_top",
+            method: "POST",
+            query: [:],
+            body: signed,
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
+        )
+    }
+
+    func removeConversation(session: BiliSession, talkerID: Int) async throws {
+        let signed = try await signedQuery([
+            "talker_id": "\(talkerID)",
+            "session_type": "1",
+            "build": "0",
+            "mobi_app": "web",
+            "csrf_token": session.csrf,
+            "csrf": session.csrf
+        ])
+
+        let _ = try await request(
+            baseURL: vcBaseURL,
+            path: "/session_svr/v1/session_svr/remove_session",
+            method: "POST",
+            query: [:],
+            body: signed,
             contentType: .form,
             headers: authenticatedHeaders(session: session, referer: "https://message.bilibili.com/")
         )
@@ -898,6 +1121,13 @@ actor BiliAPIClient {
         }
         .sorted()
         .joined(separator: "&")
+    }
+
+    private func compactQuery(_ query: [String: String?]) -> [String: String] {
+        query.compactMapValues { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
     }
 
     private static func fileStem(from urlString: String?) -> String {

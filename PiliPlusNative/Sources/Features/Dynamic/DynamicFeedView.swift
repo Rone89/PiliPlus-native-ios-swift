@@ -57,6 +57,7 @@ struct DynamicFeedView: View {
 
     @StateObject private var viewModel = DynamicFeedViewModel()
     @State private var showLoginSheet = false
+    @State private var showComposeSheet = false
 
     var body: some View {
         Group {
@@ -101,6 +102,17 @@ struct DynamicFeedView: View {
             }
         }
         .navigationTitle("动态")
+        .toolbar {
+            if authStore.isLoggedIn {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showComposeSheet = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                }
+            }
+        }
         .task {
             await authStore.syncIfNeeded()
             await viewModel.loadIfNeeded(session: authStore.session)
@@ -113,6 +125,14 @@ struct DynamicFeedView: View {
         .sheet(isPresented: $showLoginSheet) {
             LoginView()
                 .environmentObject(authStore)
+        }
+        .sheet(isPresented: $showComposeSheet) {
+            ComposeDynamicView {
+                Task {
+                    await viewModel.refresh(session: authStore.session)
+                }
+            }
+            .environmentObject(authStore)
         }
     }
 }

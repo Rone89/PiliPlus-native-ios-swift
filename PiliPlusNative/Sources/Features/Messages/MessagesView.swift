@@ -28,6 +28,26 @@ final class MessagesViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    func remove(session: BiliSession?, sessionPreview: BiliPrivateSession) async {
+        guard let session else { return }
+        do {
+            try await BiliAPIClient.shared.removeConversation(session: session, talkerID: sessionPreview.talkerID)
+            sessions.removeAll { $0.id == sessionPreview.id }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func togglePinned(session: BiliSession?, sessionPreview: BiliPrivateSession) async {
+        guard let session else { return }
+        do {
+            try await BiliAPIClient.shared.setConversationPinned(session: session, talkerID: sessionPreview.talkerID, pinned: !sessionPreview.isPinned)
+            await refresh(session: session)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 }
 
 struct MessagesView: View {
@@ -66,6 +86,23 @@ struct MessagesView: View {
                                     } label: {
                                         SessionRow(sessionPreview: sessionPreview)
                                     }
+                                    .contextMenu {
+                                        Button {
+                                            Task {
+                                                await viewModel.togglePinned(session: authStore.session, sessionPreview: sessionPreview)
+                                            }
+                                        } label: {
+                                            Label(sessionPreview.isPinned ? "取消置顶" : "置顶会话", systemImage: sessionPreview.isPinned ? "pin.slash" : "pin")
+                                        }
+
+                                        Button(role: .destructive) {
+                                            Task {
+                                                await viewModel.remove(session: authStore.session, sessionPreview: sessionPreview)
+                                            }
+                                        } label: {
+                                            Label("移除会话", systemImage: "trash")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -79,13 +116,24 @@ struct MessagesView: View {
             } else {
                 RequireLoginView(
                     title: "登录后查看私信",
-                    message: "扫码登录后即可同步会话列表和私信未读数。"
+                    message: "扫码登录后即可同步会话列表、消息中心和私信未读数。"
                 ) {
                     showLoginSheet = true
                 }
             }
         }
         .navigationTitle("私信")
+        .toolbar {
+            if authStore.isLoggedIn {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        NotificationsView()
+                    } label: {
+                        Image(systemName: "bell")
+                    }
+                }
+            }
+        }
         .task {
             await authStore.syncIfNeeded()
             await viewModel.loadIfNeeded(session: authStore.session)
@@ -126,9 +174,18 @@ private struct SessionRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(sessionPreview.name)
-                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text(sessionPreview.name)
+                            .font(.headline)
+                        if sessionPreview.isPinned {
+                            Image(systemName: "pin.fill")
+                                .font(.caption)
+                                .foregroundStyle(AppTheme.accent)
+                        }
+                    }
+
                     Spacer()
+
                     if let time = sessionPreview.lastTimestamp,
                        let relative = BiliFormat.relativeDate(time) {
                         Text(relative)
