@@ -1,0 +1,42 @@
+name: PiliPlusNative
+options:
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    PRODUCT_NAME: PiliPlusNative
+    PRODUCT_BUNDLE_IDENTIFIER: com.example.PiliPlusNative
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: NO
+    INFOPLIST_FILE: PiliPlusNative/Resources/Info.plist
+    SWIFT_VERSION: 5.10
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    TARGETED_DEVICE_FAMILY: "1,2"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+targets:
+  PiliPlusNative:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: PiliPlusNative/Sources
+    resources:
+      - path: PiliPlusNative/Resources
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: PiliPlusNative
+        ENABLE_PREVIEWS: YES
+        SUPPORTS_MACCATALYST: NO
+schemes:
+  PiliPlusNative:
+    build:
+      targets:
+        PiliPlusNative: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+

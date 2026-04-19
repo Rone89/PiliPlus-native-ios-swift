@@ -1,0 +1,143 @@
+import Foundation
+
+struct BiliVideoStats: Hashable {
+    let plays: String
+    let danmaku: String?
+    let likes: String?
+}
+
+struct BiliOwner: Hashable {
+    let name: String
+}
+
+struct BiliVideo: Identifiable, Hashable {
+    let bvid: String
+    let title: String
+    let coverURL: URL?
+    let duration: Int
+    let owner: BiliOwner
+    let stats: BiliVideoStats
+    let descriptionText: String
+    let publishedAt: Int?
+
+    var id: String { bvid }
+    var pageURL: URL? { URL(string: "https://www.bilibili.com/video/\(bvid)") }
+
+    init(
+        bvid: String,
+        title: String,
+        coverURL: URL?,
+        duration: Int,
+        owner: BiliOwner,
+        stats: BiliVideoStats,
+        descriptionText: String,
+        publishedAt: Int?
+    ) {
+        self.bvid = bvid
+        self.title = title
+        self.coverURL = coverURL
+        self.duration = duration
+        self.owner = owner
+        self.stats = stats
+        self.descriptionText = descriptionText
+        self.publishedAt = publishedAt
+    }
+
+    init?(json: [String: Any]) {
+        let bvid = json.string("bvid") ?? json.string("goto_id")
+        guard let bvid, !bvid.isEmpty else { return nil }
+
+        let ownerJSON = json.dictionary("owner")
+        let argsJSON = json.dictionary("args")
+        let title = BiliFormat.plainText(json.string("title") ?? json.string("share_copy") ?? "未命名视频")
+        let ownerName = BiliFormat.plainText(
+            ownerJSON?.string("name") ??
+            ownerJSON?.string("uname") ??
+            argsJSON?.string("up_name") ??
+            json.string("author") ??
+            "未知 UP"
+        )
+
+        let statsJSON = json.dictionary("stat") ?? json.dictionary("stats")
+        let duration = BiliFormat.parseDuration(json["duration"])
+        let plays = BiliFormat.countText(statsJSON?["view"] ?? json["play"]) ?? "--"
+        let danmaku = BiliFormat.countText(statsJSON?["danmaku"] ?? json["video_review"] ?? json["danmaku"])
+        let likes = BiliFormat.countText(statsJSON?["like"] ?? json["like"])
+        let desc = BiliFormat.plainText(json.string("desc") ?? json.string("description"))
+        let publishedAt = BiliFormat.intValue(json["pubdate"] ?? json["pub_time"] ?? json["ctime"])
+
+        self.init(
+            bvid: bvid,
+            title: title,
+            coverURL: BiliFormat.normalizeURL(json.string("pic") ?? json.string("cover")),
+            duration: duration,
+            owner: BiliOwner(name: ownerName),
+            stats: BiliVideoStats(plays: plays, danmaku: danmaku, likes: likes),
+            descriptionText: desc,
+            publishedAt: publishedAt
+        )
+    }
+}
+
+struct BiliVideoPage: Identifiable, Hashable {
+    let cid: Int
+    let page: Int
+    let title: String
+    let duration: Int
+
+    var id: Int { cid }
+
+    var label: String {
+        if title.isEmpty {
+            return "P\(page)"
+        }
+        return "P\(page) \(title)"
+    }
+
+    init?(json: [String: Any]) {
+        guard let cid = BiliFormat.intValue(json["cid"]) else { return nil }
+        self.cid = cid
+        self.page = BiliFormat.intValue(json["page"]) ?? 1
+        self.title = BiliFormat.plainText(json.string("part"))
+        self.duration = BiliFormat.intValue(json["duration"]) ?? 0
+    }
+}
+
+struct BiliVideoDetail {
+    let video: BiliVideo
+    let pages: [BiliVideoPage]
+    let related: [BiliVideo]
+}
+
+struct BiliPlayback {
+    let streamURL: URL
+    let qualityDescription: String
+}
+
+struct BiliTrendingKeyword: Identifiable, Hashable {
+    let keyword: String
+    let displayText: String
+
+    var id: String { keyword }
+}
+
+extension Dictionary where Key == String, Value == Any {
+    func string(_ key: String) -> String? {
+        switch self[key] {
+        case let value as String:
+            return value
+        case let value as NSNumber:
+            return value.stringValue
+        default:
+            return nil
+        }
+    }
+
+    func dictionary(_ key: String) -> [String: Any]? {
+        self[key] as? [String: Any]
+    }
+
+    func array(_ key: String) -> [[String: Any]] {
+        self[key] as? [[String: Any]] ?? []
+    }
+}
