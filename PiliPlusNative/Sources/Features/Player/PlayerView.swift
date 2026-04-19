@@ -6,19 +6,44 @@ import SwiftUI
 final class PlayerViewModel: ObservableObject {
     @Published private(set) var playback: BiliPlayback?
     @Published private(set) var isLoading = false
+    @Published private(set) var currentSeconds = 0.0
     @Published var errorMessage: String?
     @Published var selectedPageIndex: Int
+    @Published var playbackRate = 1.0
 
     let detail: BiliVideoDetail
     let player = AVPlayer()
 
-    init(detail: BiliVideoDetail, initialPageIndex: Int) {
+    private let initialPageIndex: Int
+    private let initialStartAtSeconds: Double?
+    private weak var libraryStore: LibraryStore?
+    private var timeObserver: Any?
+
+    init(detail: BiliVideoDetail, initialPageIndex: Int, startAtSeconds: Double? = nil) {
         self.detail = detail
+        self.initialPageIndex = min(max(initialPageIndex, 0), max(detail.pages.count - 1, 0))
+        self.initialStartAtSeconds = startAtSeconds
         self.selectedPageIndex = min(max(initialPageIndex, 0), max(detail.pages.count - 1, 0))
     }
 
     var currentPage: BiliVideoPage? {
         detail.pages[safe: selectedPageIndex]
+    }
+
+    var canGoToPreviousPage: Bool {
+        selectedPageIndex > 0
+    }
+
+    var canGoToNextPage: Bool {
+        selectedPageIndex < detail.pages.count - 1
+    }
+
+    func attachLibrary(_ store: LibraryStore) {
+        guard libraryStore !== store else { return }
+        libraryStore = store
+        if timeObserver == nil {
+            configureTimeObserver()
+        }
     }
 
     func loadCurrentPage() async {
@@ -30,7 +55,10 @@ final class PlayerViewModel: ObservableObject {
         do {
             let playback = try await BiliAPIClient.shared.fetchPlayback(bvid: detail.video.bvid, cid: page.cid)
             self.playback = playback
-            configurePlayer(with: playback.streamURL)
+            let resumeProgress = resumeProgress(for: page)
+            currentSeconds = resumeProgress ?? 0
+            configurePlayer(with: playback.streamURL, startAtSeconds: resumeProgress)
+            libraryStore?.updateWatchRecord(video: detail.video, page: page, progressSeconds: resumeProgress ?? 0)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -38,12 +66,44 @@ final class PlayerViewModel: ObservableObject {
 
     func selectPage(at index: Int) async {
         guard selectedPageIndex != index else { return }
+        persistCurrentProgress()
         selectedPageIndex = index
         await loadCurrentPage()
     }
 
-    private func configurePlayer(with url: URL) {
-        // Bilibili 视频直链通常要求 Referer/User-Agent，请求头通过 AVURLAsset 传入。
+    func goToPreviousPage() async {
+        guard canGoToPreviousPage else { return }
+        await selectPage(at: selectedPageIndex - 1)
+    }
+
+    func goToNextPage() async {
+        guard canGoToNextPage else { return }
+        await selectPage(at: selectedPageIndex + 1)
+    }
+
+    func setPlaybackRate(_ rate: Double) {
+        playbackRate = rate
+        if player.timeControlStatus != .paused {
+            player.playImmediately(atRate: Float(rate))
+        }
+    }
+
+    func persistCurrentProgress() {
+        guard let page = currentPage else { return }
+        let seconds = player.currentTime().seconds
+        guard seconds.isFinite, seconds >= 0 else { return }
+        currentSeconds = seconds
+        libraryStore?.updateWatchRecord(video: detail.video, page: page, progressSeconds: seconds)
+    }
+
+    private func resumeProgress(for page: BiliVideoPage) -> Double? {
+        if selectedPageIndex == initialPageIndex, let initialStartAtSeconds, initialStartAtSeconds > 0 {
+            return initialStartAtSeconds
+        }
+        return libraryStore?.resumeProgress(for: detail.video.bvid, cid: page.cid)
+    }
+
+    private func configurePlayer(with url: URL, startAtSeconds: Double?) {
         let options: [String: Any] = [
             "AVURLAssetHTTPHeaderFieldsKey": [
                 "Referer": "https://www.bilibili.com/video/\(detail.video.bvid)",
@@ -54,19 +114,45 @@ final class PlayerViewModel: ObservableObject {
         let asset = AVURLAsset(url: url, options: options)
         let item = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: item)
-        player.play()
+
+        Task { @MainActor in
+            if let startAtSeconds, startAtSeconds > 0 {
+                try? await Task.sleep(for: .milliseconds(350))
+                player.seek(to: CMTime(seconds: startAtSeconds, preferredTimescale: 600))
+            }
+            player.playImmediately(atRate: Float(playbackRate))
+        }
     }
 
-    deinit {
+    private func configureTimeObserver() {
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 5, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            guard let self else { return }
+            let seconds = time.seconds
+            guard seconds.isFinite, seconds >= 0, let page = self.currentPage else { return }
+            self.currentSeconds = seconds
+            self.libraryStore?.updateWatchRecord(video: self.detail.video, page: page, progressSeconds: seconds)
+        }
+    }
+
+    func tearDown() {
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
         player.pause()
     }
 }
 
 struct PlayerView: View {
+    @EnvironmentObject private var libraryStore: LibraryStore
+
     @StateObject private var viewModel: PlayerViewModel
 
-    init(detail: BiliVideoDetail, initialPageIndex: Int) {
-        _viewModel = StateObject(wrappedValue: PlayerViewModel(detail: detail, initialPageIndex: initialPageIndex))
+    init(detail: BiliVideoDetail, initialPageIndex: Int, startAtSeconds: Double? = nil) {
+        _viewModel = StateObject(wrappedValue: PlayerViewModel(detail: detail, initialPageIndex: initialPageIndex, startAtSeconds: startAtSeconds))
     }
 
     var body: some View {
@@ -91,6 +177,12 @@ struct PlayerView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    if let page = viewModel.currentPage {
+                        Text(BiliFormat.progressText(viewModel.currentSeconds, total: page.duration))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if viewModel.isLoading {
@@ -99,34 +191,10 @@ struct PlayerView: View {
                     ContentUnavailableView("播放失败", systemImage: "play.slash.fill", description: Text(errorMessage))
                 }
 
-                if !viewModel.detail.pages.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("切换分 P")
-                            .font(.headline)
+                playbackControls
 
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(Array(viewModel.detail.pages.enumerated()), id: \.offset) { index, page in
-                                    Button {
-                                        Task {
-                                            await viewModel.selectPage(at: index)
-                                        }
-                                    } label: {
-                                        Text(page.label)
-                                            .font(.subheadline.weight(.medium))
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 10)
-                                            .background(
-                                                index == viewModel.selectedPageIndex ? AppTheme.accent : AppTheme.card,
-                                                in: Capsule()
-                                            )
-                                            .foregroundStyle(index == viewModel.selectedPageIndex ? .white : .primary)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
+                if !viewModel.detail.pages.isEmpty {
+                    pageSwitcher
                 }
 
                 if let pageURL = viewModel.detail.video.pageURL {
@@ -145,11 +213,99 @@ struct PlayerView: View {
         .navigationTitle("播放")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            viewModel.attachLibrary(libraryStore)
             await viewModel.loadCurrentPage()
         }
         .onDisappear {
-            viewModel.player.pause()
+            viewModel.persistCurrentProgress()
+            viewModel.tearDown()
+        }
+    }
+
+    private var playbackControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("播放控制")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                Button {
+                    Task { await viewModel.goToPreviousPage() }
+                } label: {
+                    Label("上一 P", systemImage: "backward.end.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canGoToPreviousPage)
+
+                Button {
+                    viewModel.player.playImmediately(atRate: Float(viewModel.playbackRate))
+                } label: {
+                    Label("播放", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    viewModel.player.pause()
+                } label: {
+                    Label("暂停", systemImage: "pause.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    Task { await viewModel.goToNextPage() }
+                } label: {
+                    Label("下一 P", systemImage: "forward.end.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canGoToNextPage)
+            }
+
+            Picker("倍速", selection: $viewModel.playbackRate) {
+                Text("0.75x").tag(0.75)
+                Text("1.0x").tag(1.0)
+                Text("1.25x").tag(1.25)
+                Text("1.5x").tag(1.5)
+                Text("2.0x").tag(2.0)
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: viewModel.playbackRate) { _, newValue in
+                viewModel.setPlaybackRate(newValue)
+            }
+        }
+        .padding(16)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var pageSwitcher: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("切换分 P")
+                .font(.headline)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Array(viewModel.detail.pages.enumerated()), id: \.offset) { index, page in
+                        Button {
+                            Task {
+                                await viewModel.selectPage(at: index)
+                            }
+                        } label: {
+                            Text(page.label)
+                                .font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(
+                                    index == viewModel.selectedPageIndex ? AppTheme.accent : AppTheme.card,
+                                    in: Capsule()
+                                )
+                                .foregroundStyle(index == viewModel.selectedPageIndex ? .white : .primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 }
-

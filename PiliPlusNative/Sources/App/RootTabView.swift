@@ -25,13 +25,12 @@ struct RootTabView: View {
             }
 
             NavigationStack {
-                SettingsView()
+                LibraryView()
             }
             .tabItem {
-                Label("设置", systemImage: "gearshape")
+                Label("我的", systemImage: "person.crop.circle")
             }
         }
         .tint(AppTheme.accent)
     }
 }
-

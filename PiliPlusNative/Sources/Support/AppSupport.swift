@@ -68,6 +68,16 @@ enum BiliFormat {
         return String(format: "%02d:%02d", minutes, remaining)
     }
 
+    static func progressText(_ seconds: Double, total: Int?) -> String {
+        guard seconds.isFinite else { return "未开始" }
+        let current = max(0, Int(seconds.rounded()))
+        if let total, total > 0 {
+            let ratio = min(max(seconds / Double(total), 0), 1)
+            return "\(durationText(current)) / \(durationText(total)) · \(Int(ratio * 100))%"
+        }
+        return durationText(current)
+    }
+
     static func parseDuration(_ value: Any?) -> Int {
         if let intValue = intValue(value) {
             return intValue
@@ -114,6 +124,15 @@ enum BiliFormat {
         return formatter.localizedString(for: date, relativeTo: .now)
     }
 
+    static func absoluteDate(_ timestamp: TimeInterval?) -> String? {
+        guard let timestamp, timestamp > 0 else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: Date(timeIntervalSince1970: timestamp))
+    }
+
     static func normalizeURL(_ value: String?) -> URL? {
         guard let value, !value.isEmpty else { return nil }
         if value.hasPrefix("//") {
@@ -133,8 +152,7 @@ enum BiliFormat {
         case let value as NSNumber:
             return value.intValue
         case let value as String:
-            let digits = value.filter(\.isNumber)
-            return Int(digits)
+            return Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
         default:
             return nil
         }
@@ -164,6 +182,52 @@ struct SearchHistoryStore {
     static func clear() {
         UserDefaults.standard.removeObject(forKey: key)
     }
+}
+
+enum BiliInputParser {
+    static func extractBVID(from input: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"BV[0-9A-Za-z]{10}"#, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(input.startIndex..<input.endIndex, in: input)
+        guard let match = regex.firstMatch(in: input, options: [], range: range),
+              let matchRange = Range(match.range, in: input) else {
+            return nil
+        }
+        return String(input[matchRange]).uppercased()
+    }
+
+    static func extractAID(from input: String) -> Int? {
+        let trimmed = input.trimmed
+        if let numeric = Int(trimmed), numeric > 0 {
+            return numeric
+        }
+
+        let patterns = [
+            #"(?i)\bav(\d+)\b"#,
+            #"(?i)[?&]aid=(\d+)"#,
+            #"(?i)[?&]avid=(\d+)"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(input.startIndex..<input.endIndex, in: input)
+            guard let match = regex.firstMatch(in: input, options: [], range: range),
+                  match.numberOfRanges > 1,
+                  let matchRange = Range(match.range(at: 1), in: input) else {
+                continue
+            }
+            return Int(input[matchRange])
+        }
+
+        return nil
+    }
+}
+
+struct VideoRoute: Identifiable, Hashable {
+    let bvid: String
+
+    var id: String { bvid }
 }
 
 extension Array {

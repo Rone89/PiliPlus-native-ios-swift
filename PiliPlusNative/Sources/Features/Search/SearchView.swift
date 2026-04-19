@@ -8,10 +8,11 @@ final class SearchViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published var errorMessage: String?
+    @Published var directRoute: VideoRoute?
 
     private var currentKeyword = ""
-    private var page = 1
     private var hasMore = true
+    private var page = 1
 
     func loadTrendingIfNeeded() async {
         guard trending.isEmpty else { return }
@@ -28,6 +29,7 @@ final class SearchViewModel: ObservableObject {
             results = []
             currentKeyword = ""
             errorMessage = nil
+            directRoute = nil
             return
         }
 
@@ -35,10 +37,19 @@ final class SearchViewModel: ObservableObject {
         page = 1
         hasMore = true
         errorMessage = nil
+        directRoute = nil
         isLoading = true
         defer { isLoading = false }
 
         do {
+            if let resolvedBVID = try await BiliAPIClient.shared.resolveBVID(from: trimmed) {
+                SearchHistoryStore.save(trimmed)
+                history = SearchHistoryStore.load()
+                results = []
+                directRoute = VideoRoute(bvid: resolvedBVID)
+                return
+            }
+
             let items = try await BiliAPIClient.shared.searchVideos(keyword: trimmed, page: page)
             results = items
             page += 1
@@ -80,12 +91,25 @@ struct SearchView: View {
     @StateObject private var viewModel = SearchViewModel()
     @State private var query = ""
 
+    private var routeBinding: Binding<VideoRoute?> {
+        Binding(
+            get: { viewModel.directRoute },
+            set: { viewModel.directRoute = $0 }
+        )
+    }
+
     var body: some View {
         Group {
             if query.trimmed.isEmpty && viewModel.results.isEmpty {
                 List {
+                    Section("快速打开") {
+                        Text("支持搜索关键字，也支持直接粘贴 BV 号、av 号或 bilibili 视频链接。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if !viewModel.history.isEmpty {
-                        Section {
+                        Section("搜索历史") {
                             ForEach(viewModel.history, id: \.self) { item in
                                 HStack {
                                     Button {
@@ -110,8 +134,6 @@ struct SearchView: View {
                             Button("清空历史", role: .destructive) {
                                 viewModel.clearHistory()
                             }
-                        } header: {
-                            Text("搜索历史")
                         }
                     }
 
@@ -170,7 +192,10 @@ struct SearchView: View {
             }
         }
         .navigationTitle("搜索")
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索视频标题或 BV 号")
+        .navigationDestination(item: routeBinding) { route in
+            VideoDetailView(bvid: route.bvid)
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索视频标题、BV 号或 bilibili 链接")
         .onSubmit(of: .search) {
             Task {
                 await viewModel.search(query)
@@ -191,4 +216,3 @@ struct SearchView: View {
         }
     }
 }
-

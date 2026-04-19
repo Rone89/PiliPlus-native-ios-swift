@@ -126,6 +126,8 @@ struct VideoFeedView: View {
 }
 
 struct VideoCardView: View {
+    @EnvironmentObject private var libraryStore: LibraryStore
+
     let video: BiliVideo
 
     var body: some View {
@@ -151,6 +153,16 @@ struct VideoCardView: View {
                 }
                 .frame(height: 208)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                if libraryStore.isFavorite(video) {
+                    Image(systemName: "star.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.yellow)
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(12)
+                }
 
                 Text(BiliFormat.durationText(video.duration))
                     .font(.caption.monospacedDigit().weight(.semibold))
@@ -189,4 +201,3 @@ struct VideoCardView: View {
         .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
-

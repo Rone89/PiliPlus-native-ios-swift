@@ -78,26 +78,45 @@ actor BiliAPIClient {
         return payload.data.array("result").compactMap(BiliVideo.init(json:))
     }
 
-    func fetchVideoDetail(bvid: String) async throws -> BiliVideoDetail {
-        async let detailPayload = request(
-            path: "/x/web-interface/view",
-            query: ["bvid": bvid]
-        )
-
-        async let relatedPayload = request(
-            path: "/x/web-interface/archive/related",
-            query: ["bvid": bvid]
-        )
-
-        let detail = try await detailPayload
-        guard let video = BiliVideo(json: detail.data.raw) else {
-            throw APIError.invalidResponse("视频详情解析失败")
+    func resolveBVID(from input: String) async throws -> String? {
+        if let bvid = BiliInputParser.extractBVID(from: input) {
+            return bvid
         }
 
-        let relatedEnvelope = try await relatedPayload
-        let pages = detail.data.array("pages").compactMap(BiliVideoPage.init(json:))
-        let related = relatedEnvelope.dataList.compactMap(BiliVideo.init(json:))
-        return BiliVideoDetail(video: video, pages: pages, related: related)
+        guard let aid = BiliInputParser.extractAID(from: input) else {
+            return nil
+        }
+
+        let payload = try await fetchViewPayload(query: ["aid": "\(aid)"])
+        return payload.data.string("bvid")
+    }
+
+    func fetchVideoDetail(bvid: String) async throws -> BiliVideoDetail {
+        try await fetchVideoDetail(query: ["bvid": bvid])
+    }
+
+    func fetchVideoDetail(aid: Int) async throws -> BiliVideoDetail {
+        try await fetchVideoDetail(query: ["aid": "\(aid)"])
+    }
+
+    func fetchComments(aid: Int, nextOffset: String = "") async throws -> BiliCommentPage {
+        let escapedOffset = nextOffset.replacingOccurrences(of: "\"", with: "\\\"")
+        let payload = try await request(
+            path: "/x/v2/reply/main",
+            query: [
+                "oid": "\(aid)",
+                "type": "1",
+                "mode": "3",
+                "pagination_str": "{\"offset\":\"\(escapedOffset)\"}"
+            ]
+        )
+
+        let comments = payload.data.array("replies").compactMap(BiliComment.init(json:))
+        let cursor = payload.data.dictionary("cursor")
+        let paginationReply = cursor?.dictionary("pagination_reply")
+        let isEnd = (cursor?["is_end"] as? Bool) ?? comments.isEmpty
+        let next = paginationReply?.string("next_offset")
+        return BiliCommentPage(comments: comments, nextOffset: next, isEnd: isEnd)
     }
 
     func fetchPlayback(bvid: String, cid: Int) async throws -> BiliPlayback {
@@ -129,6 +148,32 @@ actor BiliAPIClient {
         }
 
         throw APIError.invalidResponse("播放地址为空")
+    }
+
+    private func fetchVideoDetail(query: [String: String]) async throws -> BiliVideoDetail {
+        async let detailPayload = fetchViewPayload(query: query)
+        async let relatedPayload = request(
+            path: "/x/web-interface/archive/related",
+            query: query
+        )
+
+        let detail = try await detailPayload
+        guard let video = BiliVideo(json: detail.data.raw) else {
+            throw APIError.invalidResponse("视频详情解析失败")
+        }
+
+        let relatedEnvelope = try await relatedPayload
+        let pages = detail.data.array("pages").compactMap(BiliVideoPage.init(json:))
+        let related = relatedEnvelope.dataList.compactMap(BiliVideo.init(json:))
+        return BiliVideoDetail(video: video, pages: pages, related: related)
+    }
+
+    private func fetchViewPayload(query: [String: String]) async throws -> APIEnvelope {
+        try await request(
+            path: "/x/web-interface/view",
+            query: query,
+            headers: ["Referer": "https://www.bilibili.com"]
+        )
     }
 
     private func request(
@@ -256,6 +301,10 @@ private struct APIEnvelope {
 
 private struct JSONBox {
     let raw: [String: Any]
+
+    func string(_ key: String) -> String? {
+        raw.string(key)
+    }
 
     func dictionary(_ key: String) -> [String: Any]? {
         raw[key] as? [String: Any]
