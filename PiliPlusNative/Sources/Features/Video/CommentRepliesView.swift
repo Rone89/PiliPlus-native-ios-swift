@@ -76,7 +76,7 @@ struct CommentRepliesView: View {
                 } else {
                     List {
                         Section("原评论") {
-                            CommentRow(comment: rootComment)
+                            ReplyCommentRow(comment: rootComment)
                         }
 
                         Section("回复") {
@@ -86,7 +86,7 @@ struct CommentRepliesView: View {
                                     .foregroundStyle(.secondary)
                             } else {
                                 ForEach(viewModel.replies) { reply in
-                                    CommentRow(comment: reply)
+                                    ReplyCommentRow(comment: reply)
                                         .task {
                                             await viewModel.loadMoreIfNeeded(after: reply)
                                         }
@@ -112,6 +112,71 @@ struct CommentRepliesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await viewModel.loadIfNeeded()
+            }
+        }
+    }
+}
+
+private struct ReplyCommentRow: View {
+    let comment: BiliComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AsyncImage(url: comment.avatarURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    Circle().fill(.quaternary)
+                case .empty:
+                    Circle().fill(.quaternary).overlay(ProgressView())
+                @unknown default:
+                    Circle().fill(.quaternary)
+                }
+            }
+            .frame(width: 40, height: 40)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    if let memberMid = comment.memberMid {
+                        NavigationLink {
+                            UserProfileView(mid: memberMid)
+                        } label: {
+                            Text(comment.authorName)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(comment.authorName)
+                            .font(.subheadline.weight(.semibold))
+                    }
+
+                    Spacer()
+
+                    if let relative = BiliFormat.relativeDate(comment.publishedAt) {
+                        Text(relative)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(comment.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 12) {
+                    if let likeCount = comment.likeCount {
+                        Label(likeCount, systemImage: "hand.thumbsup")
+                    }
+                    if comment.replyCount > 0 {
+                        Label("\(comment.replyCount)", systemImage: "text.bubble")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
     }

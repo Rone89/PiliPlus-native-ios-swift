@@ -138,11 +138,13 @@ final class PlayerViewModel: ObservableObject {
             forInterval: CMTime(seconds: 5, preferredTimescale: 600),
             queue: .main
         ) { [weak self] time in
-            guard let self else { return }
-            let seconds = time.seconds
-            guard seconds.isFinite, seconds >= 0, let page = self.currentPage else { return }
-            self.currentSeconds = seconds
-            self.libraryStore?.updateWatchRecord(video: self.detail.video, page: page, progressSeconds: seconds)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let seconds = time.seconds
+                guard seconds.isFinite, seconds >= 0, let page = self.currentPage else { return }
+                self.currentSeconds = seconds
+                self.libraryStore?.updateWatchRecord(video: self.detail.video, page: page, progressSeconds: seconds)
+            }
         }
     }
 
@@ -152,10 +154,10 @@ final class PlayerViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self, notification.object as AnyObject? === self.player.currentItem else { return }
-            self.persistCurrentProgress()
-            guard AppPreferences.autoPlayNext, self.canGoToNextPage else { return }
-            Task {
+            Task { @MainActor [weak self] in
+                guard let self, notification.object as AnyObject? === self.player.currentItem else { return }
+                self.persistCurrentProgress()
+                guard AppPreferences.autoPlayNext, self.canGoToNextPage else { return }
                 await self.goToNextPage()
             }
         }
