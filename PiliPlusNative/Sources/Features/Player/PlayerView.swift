@@ -115,13 +115,17 @@ final class PlayerViewModel: ObservableObject {
         let item = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: item)
 
-        Task { @MainActor in
-            if let startAtSeconds, startAtSeconds > 0 {
-                try? await Task.sleep(for: .milliseconds(350))
-                player.seek(to: CMTime(seconds: startAtSeconds, preferredTimescale: 600))
-            }
-            player.playImmediately(atRate: Float(playbackRate))
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            await self?.resumePlayback(at: startAtSeconds)
         }
+    }
+
+    private func resumePlayback(at startAtSeconds: Double?) {
+        if let startAtSeconds, startAtSeconds > 0 {
+            player.seek(to: CMTime(seconds: startAtSeconds, preferredTimescale: 600))
+        }
+        player.playImmediately(atRate: Float(playbackRate))
     }
 
     private func configureTimeObserver() {
