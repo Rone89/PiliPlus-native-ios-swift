@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published private(set) var results: [BiliVideo] = []
+    @Published private(set) var suggestions: [String] = []
     @Published private(set) var trending: [BiliTrendingKeyword] = []
     @Published private(set) var history: [String] = SearchHistoryStore.load()
     @Published private(set) var isLoading = false
@@ -27,6 +28,7 @@ final class SearchViewModel: ObservableObject {
         let trimmed = keyword.trimmed
         guard !trimmed.isEmpty else {
             results = []
+            suggestions = []
             currentKeyword = ""
             errorMessage = nil
             directRoute = nil
@@ -52,12 +54,27 @@ final class SearchViewModel: ObservableObject {
 
             let items = try await BiliAPIClient.shared.searchVideos(keyword: trimmed, page: page)
             results = items
+            suggestions = []
             page += 1
             hasMore = !items.isEmpty
             SearchHistoryStore.save(trimmed)
             history = SearchHistoryStore.load()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshSuggestions(for keyword: String) async {
+        let trimmed = keyword.trimmed
+        guard !trimmed.isEmpty, trimmed != currentKeyword else {
+            suggestions = []
+            return
+        }
+
+        do {
+            suggestions = try await BiliAPIClient.shared.fetchSearchSuggestions(term: trimmed)
+        } catch {
+            suggestions = []
         }
     }
 
@@ -195,11 +212,19 @@ struct SearchView: View {
         .navigationDestination(item: routeBinding) { route in
             VideoDetailView(bvid: route.bvid)
         }
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索视频标题、BV 号或 bilibili 链接")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索视频标题、BV 号或 bilibili 链接") {
+            ForEach(viewModel.suggestions, id: \.self) { suggestion in
+                Text(suggestion)
+                    .searchCompletion(suggestion)
+            }
+        }
         .onSubmit(of: .search) {
             Task {
                 await viewModel.search(query)
             }
+        }
+        .task(id: query) {
+            await viewModel.refreshSuggestions(for: query)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

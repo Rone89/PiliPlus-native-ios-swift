@@ -6,6 +6,34 @@ enum AppTheme {
     static let card = Color(uiColor: .secondarySystemBackground)
 }
 
+enum AppPreferences {
+    private static let defaults = UserDefaults.standard
+    private static let playbackRateKey = "preference_playback_rate"
+    private static let autoPlayNextKey = "preference_auto_play_next"
+
+    static var playbackRate: Double {
+        get {
+            let value = defaults.double(forKey: playbackRateKey)
+            return value == 0 ? 1.0 : value
+        }
+        set {
+            defaults.set(newValue, forKey: playbackRateKey)
+        }
+    }
+
+    static var autoPlayNext: Bool {
+        get {
+            if defaults.object(forKey: autoPlayNextKey) == nil {
+                return true
+            }
+            return defaults.bool(forKey: autoPlayNextKey)
+        }
+        set {
+            defaults.set(newValue, forKey: autoPlayNextKey)
+        }
+    }
+}
+
 enum FeedKind: String {
     case recommend
     case popular

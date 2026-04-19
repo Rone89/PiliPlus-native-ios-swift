@@ -6,4 +6,5 @@ artifacts/
 *.xcworkspace
 source/
 reference-native/
-
+buildlogs*/
+buildlogs*.zip

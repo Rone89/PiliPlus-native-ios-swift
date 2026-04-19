@@ -7,6 +7,7 @@ actor BiliAPIClient {
     static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 
     private let apiBaseURL = URL(string: "https://api.bilibili.com")!
+    private let searchBaseURL = URL(string: "https://s.search.bilibili.com")!
     private var cachedMixinKey: String?
     private var cachedMixinDay: Int?
 
@@ -58,6 +59,28 @@ actor BiliAPIClient {
         }
     }
 
+    func fetchSearchSuggestions(term: String) async throws -> [String] {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let payload = try await request(
+            baseURL: searchBaseURL,
+            path: "/main/suggest",
+            query: [
+                "term": trimmed,
+                "main_ver": "v1",
+                "highlight": trimmed
+            ]
+        )
+
+        let tags = payload.data.array("tag")
+        let values = tags.compactMap { item in
+            BiliFormat.plainText(item.string("value") ?? item.string("name"))
+        }
+
+        return NSOrderedSet(array: values).array as? [String] ?? values
+    }
+
     func searchVideos(keyword: String, page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
         let payload = try await request(
             path: "/x/web-interface/wbi/search/type",
@@ -91,6 +114,77 @@ actor BiliAPIClient {
         return payload.data.string("bvid")
     }
 
+    func fetchUserProfile(mid: Int) async throws -> BiliUserProfile {
+        async let profilePayload = request(
+            path: "/x/space/wbi/acc/info",
+            query: try await signedQuery([
+                "mid": "\(mid)",
+                "platform": "web",
+                "web_location": "1550101"
+            ]),
+            headers: [
+                "Origin": "https://space.bilibili.com",
+                "Referer": "https://space.bilibili.com/\(mid)"
+            ]
+        )
+
+        async let relationPayload = request(
+            path: "/x/relation/stat",
+            query: ["vmid": "\(mid)"]
+        )
+
+        async let archivePayload = request(
+            path: "/x/space/navnum",
+            query: ["mid": "\(mid)"]
+        )
+
+        let profile = try await profilePayload
+        let relation = try await relationPayload
+        let archive = try await archivePayload
+
+        let sign = BiliFormat.plainText(profile.data.string("sign"))
+        let followers = BiliFormat.countText(relation.data.raw["follower"])
+        let following = BiliFormat.countText(relation.data.raw["following"])
+        let archiveCount = BiliFormat.countText(archive.data.raw["video"])
+
+        guard let name = profile.data.string("name") else {
+            throw APIError.invalidResponse("UP 主信息为空")
+        }
+
+        return BiliUserProfile(
+            mid: mid,
+            name: BiliFormat.plainText(name),
+            faceURL: BiliFormat.normalizeURL(profile.data.string("face")),
+            sign: sign,
+            followingText: following,
+            followersText: followers,
+            archiveCountText: archiveCount
+        )
+    }
+
+    func fetchUserVideos(mid: Int, page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
+        let payload = try await request(
+            path: "/x/space/wbi/arc/search",
+            query: try await signedQuery([
+                "mid": "\(mid)",
+                "pn": "\(page)",
+                "ps": "\(pageSize)",
+                "tid": "0",
+                "order": "pubdate",
+                "keyword": "",
+                "platform": "web",
+                "web_location": "1550101"
+            ]),
+            headers: [
+                "Origin": "https://space.bilibili.com",
+                "Referer": "https://space.bilibili.com/\(mid)"
+            ]
+        )
+
+        let list = payload.data.dictionary("list")?.array("vlist") ?? []
+        return list.compactMap(BiliVideo.init(json:))
+    }
+
     func fetchVideoDetail(bvid: String) async throws -> BiliVideoDetail {
         try await fetchVideoDetail(query: ["bvid": bvid])
     }
@@ -117,6 +211,21 @@ actor BiliAPIClient {
         let isEnd = (cursor?["is_end"] as? Bool) ?? comments.isEmpty
         let next = paginationReply?.string("next_offset")
         return BiliCommentPage(comments: comments, nextOffset: next, isEnd: isEnd)
+    }
+
+    func fetchCommentReplies(aid: Int, rootCommentID: Int, page: Int) async throws -> [BiliComment] {
+        let payload = try await request(
+            path: "/x/v2/reply/reply",
+            query: [
+                "oid": "\(aid)",
+                "root": "\(rootCommentID)",
+                "pn": "\(page)",
+                "type": "1",
+                "sort": "1"
+            ]
+        )
+
+        return payload.data.array("replies").compactMap(BiliComment.init(json:))
     }
 
     func fetchPlayback(bvid: String, cid: Int) async throws -> BiliPlayback {
@@ -181,7 +290,16 @@ actor BiliAPIClient {
         query: [String: String],
         headers: [String: String] = [:]
     ) async throws -> APIEnvelope {
-        var components = URLComponents(url: apiBaseURL, resolvingAgainstBaseURL: false)
+        try await request(baseURL: apiBaseURL, path: path, query: query, headers: headers)
+    }
+
+    private func request(
+        baseURL: URL,
+        path: String,
+        query: [String: String],
+        headers: [String: String] = [:]
+    ) async throws -> APIEnvelope {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.path = path
         components?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }.sorted { $0.name < $1.name }
 

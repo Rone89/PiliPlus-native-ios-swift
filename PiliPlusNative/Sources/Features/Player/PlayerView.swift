@@ -9,7 +9,7 @@ final class PlayerViewModel: ObservableObject {
     @Published private(set) var currentSeconds = 0.0
     @Published var errorMessage: String?
     @Published var selectedPageIndex: Int
-    @Published var playbackRate = 1.0
+    @Published var playbackRate = AppPreferences.playbackRate
 
     let detail: BiliVideoDetail
     let player = AVPlayer()
@@ -18,6 +18,7 @@ final class PlayerViewModel: ObservableObject {
     private let initialStartAtSeconds: Double?
     private weak var libraryStore: LibraryStore?
     private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
 
     init(detail: BiliVideoDetail, initialPageIndex: Int, startAtSeconds: Double? = nil) {
         self.detail = detail
@@ -43,6 +44,9 @@ final class PlayerViewModel: ObservableObject {
         libraryStore = store
         if timeObserver == nil {
             configureTimeObserver()
+        }
+        if endObserver == nil {
+            configureEndObserver()
         }
     }
 
@@ -83,6 +87,7 @@ final class PlayerViewModel: ObservableObject {
 
     func setPlaybackRate(_ rate: Double) {
         playbackRate = rate
+        AppPreferences.playbackRate = rate
         if player.timeControlStatus != .paused {
             player.playImmediately(atRate: Float(rate))
         }
@@ -141,10 +146,29 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
+    private func configureEndObserver() {
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, notification.object as AnyObject? === self.player.currentItem else { return }
+            self.persistCurrentProgress()
+            guard AppPreferences.autoPlayNext, self.canGoToNextPage else { return }
+            Task {
+                await self.goToNextPage()
+            }
+        }
+    }
+
     func tearDown() {
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
             self.timeObserver = nil
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
         }
         player.pause()
     }

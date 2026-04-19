@@ -9,6 +9,7 @@ struct BiliVideoStats: Hashable, Codable {
 struct BiliOwner: Hashable, Codable {
     let name: String
     let mid: Int?
+    let faceURL: URL?
 }
 
 struct BiliVideo: Identifiable, Hashable, Codable {
@@ -82,7 +83,11 @@ struct BiliVideo: Identifiable, Hashable, Codable {
             title: title,
             coverURL: BiliFormat.normalizeURL(json.string("pic") ?? json.string("cover")),
             duration: duration,
-            owner: BiliOwner(name: ownerName, mid: ownerMid),
+            owner: BiliOwner(
+                name: ownerName,
+                mid: ownerMid,
+                faceURL: BiliFormat.normalizeURL(ownerJSON?.string("face") ?? ownerJSON?.string("avatar"))
+            ),
             stats: BiliVideoStats(plays: plays, danmaku: danmaku, likes: likes),
             descriptionText: desc,
             publishedAt: publishedAt,
@@ -135,6 +140,7 @@ struct BiliTrendingKeyword: Identifiable, Hashable {
 
 struct BiliComment: Identifiable, Hashable {
     let id: Int
+    let memberMid: Int?
     let authorName: String
     let avatarURL: URL?
     let message: String
@@ -147,6 +153,7 @@ struct BiliComment: Identifiable, Hashable {
         let member = json.dictionary("member")
         let content = json.dictionary("content")
         self.id = id
+        self.memberMid = BiliFormat.intValue(member?["mid"])
         self.authorName = BiliFormat.plainText(member?.string("uname") ?? "匿名用户")
         self.avatarURL = BiliFormat.normalizeURL(member?.string("avatar"))
         self.message = BiliFormat.plainText(content?.string("message"))
@@ -160,6 +167,18 @@ struct BiliCommentPage {
     let comments: [BiliComment]
     let nextOffset: String?
     let isEnd: Bool
+}
+
+struct BiliUserProfile: Identifiable, Hashable {
+    let mid: Int
+    let name: String
+    let faceURL: URL?
+    let sign: String
+    let followingText: String?
+    let followersText: String?
+    let archiveCountText: String?
+
+    var id: Int { mid }
 }
 
 extension Dictionary where Key == String, Value == Any {

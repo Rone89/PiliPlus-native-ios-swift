@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
     @State private var showClearHistoryConfirmation = false
     @State private var showClearFavoritesConfirmation = false
+    @State private var playbackRate = AppPreferences.playbackRate
+    @State private var autoPlayNext = AppPreferences.autoPlayNext
 
     private var versionText: String {
         let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
@@ -34,8 +36,20 @@ struct SettingsView: View {
                 .disabled(libraryStore.favorites.isEmpty)
             }
 
+            Section("播放") {
+                Toggle("自动播放下一 P", isOn: $autoPlayNext)
+
+                Picker("默认倍速", selection: $playbackRate) {
+                    Text("0.75x").tag(0.75)
+                    Text("1.0x").tag(1.0)
+                    Text("1.25x").tag(1.25)
+                    Text("1.5x").tag(1.5)
+                    Text("2.0x").tag(2.0)
+                }
+            }
+
             Section("当前已支持") {
-                Text("推荐、热门、搜索、BV/链接直达、视频详情、评论区、本地收藏、继续播放、观看历史、倍速控制，以及 GitHub Actions unsigned IPA 发布流程。")
+                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、视频详情、评论区与回复、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
             }
 
             Section("后续可继续补完") {
@@ -49,6 +63,12 @@ struct SettingsView: View {
         }
         .navigationTitle("设置")
         .listStyle(.insetGrouped)
+        .onChange(of: playbackRate) { _, newValue in
+            AppPreferences.playbackRate = newValue
+        }
+        .onChange(of: autoPlayNext) { _, newValue in
+            AppPreferences.autoPlayNext = newValue
+        }
         .confirmationDialog("确认清空全部历史记录？", isPresented: $showClearHistoryConfirmation) {
             Button("清空历史", role: .destructive) {
                 libraryStore.clearHistory()

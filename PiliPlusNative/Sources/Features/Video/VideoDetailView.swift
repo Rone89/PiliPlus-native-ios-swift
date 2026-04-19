@@ -88,6 +88,7 @@ struct VideoDetailView: View {
 
     @StateObject private var viewModel: VideoDetailViewModel
     @State private var selectedPageIndex = 0
+    @State private var selectedComment: BiliComment?
 
     init(bvid: String) {
         _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid))
@@ -130,7 +131,16 @@ struct VideoDetailView: View {
                                 .font(.title2.bold())
 
                             HStack(spacing: 12) {
-                                Label(detail.video.owner.name, systemImage: "person.crop.circle")
+                                if let mid = detail.video.owner.mid {
+                                    NavigationLink {
+                                        UserProfileView(mid: mid)
+                                    } label: {
+                                        Label(detail.video.owner.name, systemImage: "person.crop.circle")
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    Label(detail.video.owner.name, systemImage: "person.crop.circle")
+                                }
                                 Label(detail.video.stats.plays, systemImage: "play.fill")
                                 if let likes = detail.video.stats.likes {
                                     Label(likes, systemImage: "hand.thumbsup.fill")
@@ -215,6 +225,11 @@ struct VideoDetailView: View {
                         selectedPageIndex = index
                     }
                 }
+                .sheet(item: $selectedComment) { comment in
+                    if let aid = detail.video.aid {
+                        CommentRepliesView(aid: aid, rootComment: comment)
+                    }
+                }
             }
         }
         .navigationTitle("视频详情")
@@ -244,6 +259,15 @@ struct VideoDetailView: View {
                 if let pageURL = detail.video.pageURL {
                     Link(destination: pageURL) {
                         actionButtonLabel(title: "Safari", systemImage: "safari")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let mid = detail.video.owner.mid {
+                    NavigationLink {
+                        UserProfileView(mid: mid)
+                    } label: {
+                        actionButtonLabel(title: "UP 主页", systemImage: "person.crop.circle")
                     }
                     .buttonStyle(.plain)
                 }
@@ -340,7 +364,11 @@ struct VideoDetailView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.comments) { comment in
-                    CommentRow(comment: comment)
+                    CommentRow(comment: comment) {
+                        if comment.replyCount > 0 {
+                            selectedComment = comment
+                        }
+                    }
                 }
 
                 if viewModel.isLoadingMoreComments {
@@ -371,6 +399,7 @@ struct VideoDetailView: View {
 
 private struct CommentRow: View {
     let comment: BiliComment
+    var onTapReply: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -393,8 +422,18 @@ private struct CommentRow: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(comment.authorName)
-                        .font(.subheadline.weight(.semibold))
+                    if let memberMid = comment.memberMid {
+                        NavigationLink {
+                            UserProfileView(mid: memberMid)
+                        } label: {
+                            Text(comment.authorName)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(comment.authorName)
+                            .font(.subheadline.weight(.semibold))
+                    }
                     Spacer()
                     if let relative = BiliFormat.relativeDate(comment.publishedAt) {
                         Text(relative)
@@ -412,7 +451,16 @@ private struct CommentRow: View {
                         Label(likeCount, systemImage: "hand.thumbsup")
                     }
                     if comment.replyCount > 0 {
-                        Label("\(comment.replyCount)", systemImage: "text.bubble")
+                        if let onTapReply {
+                            Button {
+                                onTapReply()
+                            } label: {
+                                Label("\(comment.replyCount)", systemImage: "text.bubble")
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Label("\(comment.replyCount)", systemImage: "text.bubble")
+                        }
                     }
                 }
                 .font(.caption)
