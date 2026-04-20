@@ -4,17 +4,18 @@ struct SettingsView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
     @EnvironmentObject private var authStore: AuthStore
 
+    @AppStorage("preference_recommend_with_account") private var recommendWithAccount = true
+    @AppStorage("preference_refresh_trigger_distance") private var refreshTriggerDistance = 110.0
+
     @State private var showClearHistoryConfirmation = false
     @State private var showClearFavoritesConfirmation = false
     @State private var playbackRate = AppPreferences.playbackRate
     @State private var autoPlayNext = AppPreferences.autoPlayNext
     @State private var showDanmaku = AppPreferences.showDanmaku
-    @State private var recommendWithAccount = AppPreferences.recommendWithAccount
-    @State private var refreshTriggerDistance = AppPreferences.refreshTriggerDistance
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.13"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "23"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.14"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "24"
         return "\(shortVersion) (\(build))"
     }
 
@@ -132,12 +133,6 @@ struct SettingsView: View {
         }
         .onChange(of: showDanmaku) { _, newValue in
             AppPreferences.showDanmaku = newValue
-        }
-        .onChange(of: recommendWithAccount) { _, newValue in
-            AppPreferences.recommendWithAccount = newValue
-        }
-        .onChange(of: refreshTriggerDistance) { _, newValue in
-            AppPreferences.refreshTriggerDistance = newValue
         }
         .confirmationDialog("确认清空全部历史记录？", isPresented: $showClearHistoryConfirmation) {
             Button("清空历史", role: .destructive) {

@@ -112,6 +112,7 @@ struct VideoFeedView: View {
     @State private var previousPullOffset: CGFloat = 0
     @State private var isRefreshArmed = false
     @State private var isPullRefreshing = false
+    @State private var baselineOffset: CGFloat?
 
     var body: some View {
         Group {
@@ -124,7 +125,7 @@ struct VideoFeedView: View {
                 ScrollView {
                     GeometryReader { proxy in
                         Color.clear
-                            .preference(key: PullRefreshOffsetKey.self, value: proxy.frame(in: .named("recommend-scroll")).minY)
+                            .preference(key: PullRefreshOffsetKey.self, value: proxy.frame(in: .global).minY)
                     }
                     .frame(height: 0)
 
@@ -163,7 +164,6 @@ struct VideoFeedView: View {
                     }
                     .padding(.vertical)
                 }
-                .coordinateSpace(name: "recommend-scroll")
                 .overlay(alignment: .top) {
                     PullRefreshIndicator(
                         offset: pullOffset,
@@ -173,7 +173,7 @@ struct VideoFeedView: View {
                     )
                 }
                 .onPreferenceChange(PullRefreshOffsetKey.self) { value in
-                    handlePullOffset(max(0, value))
+                    handlePullOffset(value)
                 }
             }
         }
@@ -195,7 +195,12 @@ struct VideoFeedView: View {
         preferPersonalized ? "当前使用登录账号参与推荐" : "当前使用匿名推荐"
     }
 
-    private func handlePullOffset(_ newOffset: CGFloat) {
+    private func handlePullOffset(_ rawOffset: CGFloat) {
+        if baselineOffset == nil {
+            baselineOffset = rawOffset
+        }
+
+        let newOffset = max(0, rawOffset - (baselineOffset ?? rawOffset))
         previousPullOffset = pullOffset
         pullOffset = newOffset
 
@@ -207,7 +212,8 @@ struct VideoFeedView: View {
 
         if isRefreshArmed,
            previousPullOffset > newOffset,
-           newOffset <= refreshTriggerDistance * 0.55 {
+           previousPullOffset >= refreshTriggerDistance,
+           newOffset <= refreshTriggerDistance * 0.3 {
             triggerRefresh()
         }
     }
@@ -224,6 +230,7 @@ struct VideoFeedView: View {
                 isPullRefreshing = false
                 pullOffset = 0
                 previousPullOffset = 0
+                baselineOffset = nil
             }
         }
     }

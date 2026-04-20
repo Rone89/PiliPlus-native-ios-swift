@@ -535,6 +535,7 @@ actor BiliAPIClient {
             BiliFormat.normalizeURL(
                 item.string("url") ??
                 item.string("src") ??
+                item.string("live_url") ??
                 item.dictionary("img_src")?.string("url")
             )
         }
@@ -1039,7 +1040,8 @@ actor BiliAPIClient {
                 "type": "\(type)",
                 "mode": "3",
                 "pagination_str": "{\"offset\":\"\(escapedOffset)\"}"
-            ]
+            ],
+            headers: anonymousReplyHeaders
         )
 
         let comments = payload.data.array("replies").compactMap(BiliComment.init(json:))
@@ -1233,6 +1235,15 @@ actor BiliAPIClient {
             "x-bili-aurora-eid": "",
             "x-bili-aurora-zone": "",
             "bili-http-engine": "cronet"
+        ]
+    }
+
+    private var anonymousReplyHeaders: [String: String] {
+        [
+            "Cookie": "",
+            "env": "prod",
+            "app-key": "android64",
+            "x-bili-aurora-zone": "sh001"
         ]
     }
 
