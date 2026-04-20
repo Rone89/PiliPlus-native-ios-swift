@@ -52,11 +52,11 @@ struct BiliVideo: Identifiable, Hashable, Codable {
     }
 
     init?(json: [String: Any]) {
-        let bvid = json.string("bvid") ?? json.string("goto_id")
+        let argsJSON = json.dictionary("args")
+        let bvid = json.string("bvid") ?? json.string("goto_id") ?? argsJSON?.string("bvid")
         guard let bvid, !bvid.isEmpty else { return nil }
 
         let ownerJSON = json.dictionary("owner")
-        let argsJSON = json.dictionary("args")
         let title = BiliFormat.plainText(json.string("title") ?? json.string("share_copy") ?? "未命名视频")
         let ownerName = BiliFormat.plainText(
             ownerJSON?.string("name") ??

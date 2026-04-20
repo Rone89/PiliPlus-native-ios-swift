@@ -12,6 +12,7 @@ enum AppPreferences {
     private static let autoPlayNextKey = "preference_auto_play_next"
     private static let showDanmakuKey = "preference_show_danmaku"
     private static let messageDeviceIDKey = "preference_message_device_id"
+    private static let anonymousBuvid3Key = "preference_anonymous_buvid3"
 
     static var playbackRate: Double {
         get {
@@ -58,6 +59,20 @@ enum AppPreferences {
         }
         set {
             defaults.set(newValue, forKey: messageDeviceIDKey)
+        }
+    }
+
+    static var anonymousBuvid3: String {
+        get {
+            if let existing = defaults.string(forKey: anonymousBuvid3Key), !existing.isEmpty {
+                return existing
+            }
+            let generated = "XY\(UUID().uuidString.replacingOccurrences(of: "-", with: "").uppercased())infoc"
+            defaults.set(generated, forKey: anonymousBuvid3Key)
+            return generated
+        }
+        set {
+            defaults.set(newValue, forKey: anonymousBuvid3Key)
         }
     }
 }
@@ -204,6 +219,9 @@ enum BiliFormat {
         guard let value, !value.isEmpty else { return nil }
         if value.hasPrefix("//") {
             return URL(string: "https:\(value)")
+        }
+        if value.hasPrefix("http://") {
+            return URL(string: "https://" + value.dropFirst("http://".count))
         }
         return URL(string: value)
     }

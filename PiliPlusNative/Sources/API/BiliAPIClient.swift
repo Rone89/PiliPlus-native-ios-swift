@@ -8,6 +8,7 @@ actor BiliAPIClient {
     static let appUserAgent = "Mozilla/5.0 BiliDroid/2.0.1 (bbcallen@gmail.com) os/android model/android_hd mobi_app/android_hd build/2001100 channel/master innerVer/2001100 osVer/15 network/2"
 
     private let apiBaseURL = URL(string: "https://api.bilibili.com")!
+    private let appBaseURL = URL(string: "https://app.bilibili.com")!
     private let searchBaseURL = URL(string: "https://s.search.bilibili.com")!
     private let passBaseURL = URL(string: "https://passport.bilibili.com")!
     private let vcBaseURL = URL(string: "https://api.vc.bilibili.com")!
@@ -41,29 +42,59 @@ actor BiliAPIClient {
     }
 
     func fetchRecommended(page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
-        do {
-            let index = max(page - 1, 0)
-            let payload = try await request(
-                path: "/x/web-interface/wbi/index/top/feed/rcmd",
-                query: try await signedQuery([
-                    "version": "1",
-                    "feed_version": "V8",
-                    "homepage_ver": "1",
-                    "ps": "\(pageSize)",
-                    "fresh_idx": "\(index)",
-                    "brush": "\(index)",
-                    "fresh_type": "4"
-                ])
-            )
+        let index = max(page - 1, 0)
+        let params = appSignedParameters([
+            "build": "2001100",
+            "c_locale": "zh_CN",
+            "channel": "master",
+            "column": "4",
+            "device": "pad",
+            "device_name": "android",
+            "device_type": "0",
+            "disable_rcmd": "0",
+            "flush": "5",
+            "fnval": "976",
+            "fnver": "0",
+            "force_host": "2",
+            "fourk": "1",
+            "guidance": "0",
+            "https_url_req": "0",
+            "idx": "\(index)",
+            "mobi_app": "android_hd",
+            "network": "wifi",
+            "platform": "android",
+            "player_net": "1",
+            "pull": index == 0 ? "true" : "false",
+            "qn": "32",
+            "recsys_mode": "0",
+            "s_locale": "zh_CN",
+            "splash_id": "",
+            "statistics": #"{"appId":5,"platform":3,"version":"2.0.1","abtest":""}"#,
+            "voice_balance": "0"
+        ])
 
-            return payload.data.array("item").compactMap { item in
-                guard item.string("goto") == "av" else { return nil }
-                return BiliVideo(json: item)
+        let payload = try await request(
+            baseURL: appBaseURL,
+            path: "/x/v2/feed/index",
+            query: params,
+            headers: anonymousAppHeaders
+        )
+
+        let items = payload.data.array("items")
+        let videos = items.compactMap { item -> BiliVideo? in
+            let cardGoto = item.string("card_goto")
+            guard cardGoto != "ad_av",
+                  cardGoto != "ad_web_s",
+                  item["ad_info"] == nil else {
+                return nil
             }
-        } catch {
-            // Fallback: at least keep the home feed usable for anonymous users.
+            return BiliVideo(json: item)
+        }
+
+        if videos.isEmpty {
             return try await fetchPopular(page: page, pageSize: pageSize)
         }
+        return videos
     }
 
     func fetchPopular(page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
@@ -125,7 +156,8 @@ actor BiliAPIClient {
             ]),
             headers: [
                 "Origin": "https://search.bilibili.com",
-                "Referer": "https://search.bilibili.com/video?keyword=\(keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)"
+                "Referer": "https://search.bilibili.com/video?keyword=\(keyword.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? keyword)",
+                "Cookie": anonymousCookieHeader
             ]
         )
 
@@ -998,6 +1030,26 @@ actor BiliAPIClient {
             "x-bili-aurora-zone": "",
             "bili-http-engine": "cronet",
             "content-type": "application/x-www-form-urlencoded; charset=utf-8"
+        ]
+    }
+
+    private var anonymousCookieHeader: String {
+        let buvid3 = AppPreferences.anonymousBuvid3
+        let bNut = "\(Int(Date().timeIntervalSince1970))"
+        return "buvid3=\(buvid3); b_nut=\(bNut); _uuid=\(UUID().uuidString)"
+    }
+
+    private var anonymousAppHeaders: [String: String] {
+        [
+            "User-Agent": Self.appUserAgent,
+            "Cookie": anonymousCookieHeader,
+            "buvid": AppPreferences.anonymousBuvid3,
+            "env": "prod",
+            "app-key": "android_hd",
+            "x-bili-trace-id": appTraceID,
+            "x-bili-aurora-eid": "",
+            "x-bili-aurora-zone": "",
+            "bili-http-engine": "cronet"
         ]
     }
 
