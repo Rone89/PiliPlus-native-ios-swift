@@ -95,7 +95,7 @@ struct DynamicFeedView: View {
             } else {
                 RequireLoginView(
                     title: "登录后查看动态",
-                    message: "扫码登录后就能同步关注动态和动态未读数。"
+                    message: "首页推荐、视频详情、播放和搜索都可以直接使用；扫码登录后才会同步关注动态和动态未读数。"
                 ) {
                     showLoginSheet = true
                 }

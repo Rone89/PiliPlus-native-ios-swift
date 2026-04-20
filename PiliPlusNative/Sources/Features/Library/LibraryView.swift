@@ -122,7 +122,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var accountSection: some View {
-        Section(authStore.isLoggedIn ? "账号" : "登录") {
+        Section(authStore.isLoggedIn ? "账号" : "游客模式") {
             if authStore.isLoggedIn {
                 if let user = authStore.currentUser {
                     VStack(alignment: .leading, spacing: 14) {
@@ -222,7 +222,11 @@ struct LibraryView: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("扫码登录后可同步个人中心、动态、私信未读、弹幕发送等功能。")
+                    Text("首页推荐、视频详情、播放和搜索功能都可以直接匿名使用。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text("登录后才会启用动态、私信、消息中心、弹幕发送和个人中心同步。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 

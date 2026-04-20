@@ -11,8 +11,8 @@ struct SettingsView: View {
     @State private var showDanmaku = AppPreferences.showDanmaku
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.6.1"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "10"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.1"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "12"
         return "\(shortVersion) (\(build))"
     }
 
@@ -30,6 +30,12 @@ struct SettingsView: View {
                 if let user = authStore.currentUser {
                     LabeledContent("当前账号", value: user.name)
                     LabeledContent("UID", value: "\(user.mid)")
+                }
+
+                if !authStore.isLoggedIn {
+                    Text("无需登录即可使用首页推荐、视频详情、播放和搜索。动态、私信、消息中心、弹幕发送等功能需要登录。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
 
                 NavigationLink {
@@ -83,6 +89,11 @@ struct SettingsView: View {
 
             Section("当前已支持") {
                 Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、多账号基础、个人中心同步、动态流、动态文本发布、动态详情与评论、消息中心、私信会话与发送、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
+            }
+
+            Section("游客模式") {
+                Text("游客模式下可直接使用：首页推荐、热门、搜索、搜索建议、视频详情、播放、评论查看、本地收藏与历史。")
+                Text("登录后增强：动态、消息中心、私信、弹幕发送、个人中心同步、多账号切换。")
             }
 
             Section("后续可继续补完") {

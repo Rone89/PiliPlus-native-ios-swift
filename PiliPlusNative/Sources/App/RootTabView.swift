@@ -12,6 +12,13 @@ struct RootTabView: View {
                 Label("首页", systemImage: "house")
             }
 
+            NavigationStack {
+                SearchView()
+            }
+            .tabItem {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+
             Group {
                 if authStore.unreadState.dynamicUnread > 0 {
                     NavigationStack {
@@ -48,13 +55,6 @@ struct RootTabView: View {
                         Label("私信", systemImage: "bubble.left.and.bubble.right")
                     }
                 }
-            }
-
-            NavigationStack {
-                SearchView()
-            }
-            .tabItem {
-                Label("搜索", systemImage: "magnifyingglass")
             }
 
             NavigationStack {

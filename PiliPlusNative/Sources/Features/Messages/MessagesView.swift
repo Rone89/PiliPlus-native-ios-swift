@@ -116,7 +116,7 @@ struct MessagesView: View {
             } else {
                 RequireLoginView(
                     title: "登录后查看私信",
-                    message: "扫码登录后即可同步会话列表、消息中心和私信未读数。"
+                    message: "首页推荐、视频详情、播放和搜索都可以直接使用；扫码登录后才会同步私信会话、消息中心和未读数。"
                 ) {
                     showLoginSheet = true
                 }
