@@ -65,6 +65,11 @@ final class LibraryStore: ObservableObject {
         persistFavorites()
     }
 
+    func removeFavorite(video: BiliVideo) {
+        favorites.removeAll(where: { $0.id == video.id })
+        persistFavorites()
+    }
+
     func clearFavorites() {
         favorites.removeAll()
         persistFavorites()
@@ -105,6 +110,11 @@ final class LibraryStore: ObservableObject {
 
     func removeHistory(bvid: String) {
         history.removeAll(where: { $0.video.bvid == bvid })
+        persistHistory()
+    }
+
+    func removeHistory(video: BiliVideo) {
+        history.removeAll(where: { $0.video.id == video.id })
         persistHistory()
     }
 

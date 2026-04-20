@@ -101,6 +101,12 @@ struct LibraryView: View {
                             } label: {
                                 Label("删除历史", systemImage: "trash")
                             }
+                        } else {
+                            Button(role: .destructive) {
+                                libraryStore.removeHistory(video: record.video)
+                            } label: {
+                                Label("删除历史", systemImage: "trash")
+                            }
                         }
                     }
                 }
@@ -122,6 +128,12 @@ struct LibraryView: View {
                         if let bvid = video.bvid {
                             Button(role: .destructive) {
                                 libraryStore.removeFavorite(bvid: bvid)
+                            } label: {
+                                Label("移除收藏", systemImage: "star.slash")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                libraryStore.removeFavorite(video: video)
                             } label: {
                                 Label("移除收藏", systemImage: "star.slash")
                             }
