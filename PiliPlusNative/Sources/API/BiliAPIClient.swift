@@ -1205,7 +1205,13 @@ actor BiliAPIClient {
             return cachedMixinKey
         }
 
-        let payload = try await request(path: "/x/web-interface/nav", query: [:])
+        let payload = try await rawRequest(
+            baseURL: apiBaseURL,
+            path: "/x/web-interface/nav",
+            query: [:],
+            headers: [:],
+            session: anonymousSession
+        )
         guard let wbiImage = payload.data.dictionary("wbi_img") else {
             throw APIError.invalidResponse("缺少 WBI 图片信息")
         }

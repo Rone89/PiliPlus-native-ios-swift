@@ -48,7 +48,7 @@ final class SearchViewModel: ObservableObject {
                 SearchHistoryStore.save(trimmed)
                 history = SearchHistoryStore.load()
                 results = []
-                directRoute = VideoRoute(bvid: resolvedBVID)
+                directRoute = VideoRoute(bvid: resolvedBVID, aid: nil)
                 return
             }
 
@@ -188,7 +188,7 @@ struct SearchView: View {
                     LazyVStack(spacing: 14) {
                         ForEach(viewModel.results) { video in
                             NavigationLink {
-                                VideoDetailView(bvid: video.bvid)
+                                VideoDetailView(bvid: video.bvid, aid: video.aid)
                             } label: {
                                 VideoCardView(video: video)
                             }
@@ -210,7 +210,7 @@ struct SearchView: View {
         }
         .navigationTitle("搜索")
         .navigationDestination(item: routeBinding) { route in
-            VideoDetailView(bvid: route.bvid)
+            VideoDetailView(bvid: route.bvid, aid: route.aid)
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索视频标题、BV 号或 bilibili 链接") {
             ForEach(viewModel.suggestions, id: \.self) { suggestion in

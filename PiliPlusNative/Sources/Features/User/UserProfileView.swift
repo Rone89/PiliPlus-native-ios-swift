@@ -94,7 +94,7 @@ struct UserProfileView: View {
                             } else {
                                 ForEach(viewModel.videos) { video in
                                     NavigationLink {
-                                        VideoDetailView(bvid: video.bvid)
+                                        VideoDetailView(bvid: video.bvid, aid: video.aid)
                                     } label: {
                                         VideoCardView(video: video)
                                     }

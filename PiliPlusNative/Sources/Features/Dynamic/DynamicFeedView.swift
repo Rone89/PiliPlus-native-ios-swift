@@ -240,7 +240,7 @@ struct DynamicCard: View {
 
             if let bvid = post.videoBVID {
                 NavigationLink {
-                    VideoDetailView(bvid: bvid)
+                    VideoDetailView(bvid: bvid, aid: nil)
                 } label: {
                     Label("打开视频详情", systemImage: "play.rectangle")
                         .font(.subheadline.weight(.semibold))

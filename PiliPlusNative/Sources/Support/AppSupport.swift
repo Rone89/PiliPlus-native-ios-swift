@@ -318,9 +318,10 @@ enum BiliInputParser {
 }
 
 struct VideoRoute: Identifiable, Hashable {
-    let bvid: String
+    let bvid: String?
+    let aid: Int?
 
-    var id: String { bvid }
+    var id: String { bvid ?? aid.map { "av\($0)" } ?? UUID().uuidString }
 }
 
 extension Array {

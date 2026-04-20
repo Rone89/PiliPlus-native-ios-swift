@@ -13,7 +13,7 @@ struct BiliOwner: Hashable, Codable {
 }
 
 struct BiliVideo: Identifiable, Hashable, Codable {
-    let bvid: String
+    let bvid: String?
     let aid: Int?
     let title: String
     let coverURL: URL?
@@ -24,11 +24,19 @@ struct BiliVideo: Identifiable, Hashable, Codable {
     let publishedAt: Int?
     let firstCID: Int?
 
-    var id: String { bvid }
-    var pageURL: URL? { URL(string: "https://www.bilibili.com/video/\(bvid)") }
+    var id: String { bvid ?? aid.map { "av\($0)" } ?? UUID().uuidString }
+    var pageURL: URL? {
+        if let bvid {
+            return URL(string: "https://www.bilibili.com/video/\(bvid)")
+        }
+        if let aid {
+            return URL(string: "https://www.bilibili.com/video/av\(aid)")
+        }
+        return nil
+    }
 
     init(
-        bvid: String,
+        bvid: String?,
         aid: Int?,
         title: String,
         coverURL: URL?,
@@ -54,7 +62,6 @@ struct BiliVideo: Identifiable, Hashable, Codable {
     init?(json: [String: Any]) {
         let argsJSON = json.dictionary("args")
         let bvid = json.string("bvid") ?? json.string("goto_id") ?? argsJSON?.string("bvid")
-        guard let bvid, !bvid.isEmpty else { return nil }
 
         let ownerJSON = json.dictionary("owner")
         let title = BiliFormat.plainText(json.string("title") ?? json.string("share_copy") ?? "未命名视频")
@@ -67,7 +74,8 @@ struct BiliVideo: Identifiable, Hashable, Codable {
         )
 
         let statsJSON = json.dictionary("stat") ?? json.dictionary("stats")
-        let aid = BiliFormat.intValue(json["aid"] ?? json["id"] ?? json["param"])
+        let aid = BiliFormat.intValue(json["aid"] ?? json["id"] ?? json["param"] ?? argsJSON?["aid"])
+        guard (bvid?.isEmpty == false) || aid != nil else { return nil }
         let firstCID = BiliFormat.intValue(json["cid"])
         let duration = BiliFormat.parseDuration(json["duration"])
         let plays = BiliFormat.countText(statsJSON?["view"] ?? json["play"]) ?? "--"

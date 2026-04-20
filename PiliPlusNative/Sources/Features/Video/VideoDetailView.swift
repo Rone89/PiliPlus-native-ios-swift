@@ -10,7 +10,8 @@ final class VideoDetailViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var commentsError: String?
 
-    private let bvid: String
+    private let bvid: String?
+    private let aid: Int?
     private var commentsNextOffset = ""
     private var commentsReachedEnd = false
 
@@ -18,8 +19,9 @@ final class VideoDetailViewModel: ObservableObject {
         !commentsReachedEnd && !comments.isEmpty
     }
 
-    init(bvid: String) {
+    init(bvid: String?, aid: Int?) {
         self.bvid = bvid
+        self.aid = aid
     }
 
     func loadIfNeeded() async {
@@ -37,7 +39,14 @@ final class VideoDetailViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let detail = try await BiliAPIClient.shared.fetchVideoDetail(bvid: bvid)
+            let detail: BiliVideoDetail
+            if let bvid {
+                detail = try await BiliAPIClient.shared.fetchVideoDetail(bvid: bvid)
+            } else if let aid {
+                detail = try await BiliAPIClient.shared.fetchVideoDetail(aid: aid)
+            } else {
+                throw APIError.invalidResponse("缺少视频标识")
+            }
             self.detail = detail
             if let aid = detail.video.aid {
                 await loadComments(aid: aid, reset: true)
@@ -90,8 +99,16 @@ struct VideoDetailView: View {
     @State private var selectedPageIndex = 0
     @State private var selectedComment: BiliComment?
 
+    init(bvid: String?, aid: Int?) {
+        _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid, aid: aid))
+    }
+
     init(bvid: String) {
-        _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid))
+        _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid, aid: nil))
+    }
+
+    init(aid: Int) {
+        _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: nil, aid: aid))
     }
 
     var body: some View {
@@ -102,7 +119,7 @@ struct VideoDetailView: View {
             } else if let errorMessage = viewModel.errorMessage, viewModel.detail == nil {
                 ContentUnavailableView("视频加载失败", systemImage: "play.slash", description: Text(errorMessage))
             } else if let detail = viewModel.detail {
-                let resumeRecord = libraryStore.historyRecord(for: detail.video.bvid)
+                let resumeRecord = libraryStore.historyRecord(video: detail.video)
                 let resumeIndex = resumeRecord.flatMap { record in
                     detail.pages.firstIndex(where: { $0.cid == record.pageCID })
                 } ?? 0
@@ -220,7 +237,7 @@ struct VideoDetailView: View {
                 }
                 .task(id: detail.video.id) {
                     libraryStore.refreshSnapshots(with: detail.video)
-                    if let record = libraryStore.historyRecord(for: detail.video.bvid),
+                    if let record = libraryStore.historyRecord(video: detail.video),
                        let index = detail.pages.firstIndex(where: { $0.cid == record.pageCID }) {
                         selectedPageIndex = index
                     }

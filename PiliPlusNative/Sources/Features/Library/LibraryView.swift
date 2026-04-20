@@ -16,7 +16,7 @@ struct LibraryView: View {
                 Section("继续观看") {
                     ForEach(libraryStore.history) { record in
                         NavigationLink {
-                            VideoDetailView(bvid: record.video.bvid)
+                            VideoDetailView(bvid: record.video.bvid, aid: record.video.aid)
                         } label: {
                             WatchHistoryRow(record: record)
                         }
@@ -35,7 +35,7 @@ struct LibraryView: View {
                 Section("本地收藏") {
                     ForEach(libraryStore.favorites) { video in
                         NavigationLink {
-                            VideoDetailView(bvid: video.bvid)
+                            VideoDetailView(bvid: video.bvid, aid: video.aid)
                         } label: {
                             FavoriteRow(video: video)
                         }

@@ -10,7 +10,7 @@ struct WatchRecord: Identifiable, Hashable, Codable {
     let progressSeconds: Double
     let updatedAt: TimeInterval
 
-    var id: String { video.bvid }
+    var id: String { video.id }
 
     var pageLabel: String {
         if pageTitle.isEmpty {
@@ -44,7 +44,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func isFavorite(_ video: BiliVideo) -> Bool {
-        favorites.contains(where: { $0.bvid == video.bvid })
+        favorites.contains(where: { $0.id == video.id })
     }
 
     func isFavorite(bvid: String) -> Bool {
@@ -52,7 +52,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func toggleFavorite(_ video: BiliVideo) {
-        if let index = favorites.firstIndex(where: { $0.bvid == video.bvid }) {
+        if let index = favorites.firstIndex(where: { $0.id == video.id }) {
             favorites.remove(at: index)
         } else {
             favorites.insert(video, at: 0)
@@ -74,6 +74,10 @@ final class LibraryStore: ObservableObject {
         history.first(where: { $0.video.bvid == bvid })
     }
 
+    func historyRecord(video: BiliVideo) -> WatchRecord? {
+        history.first(where: { $0.video.id == video.id })
+    }
+
     func resumeProgress(for bvid: String, cid: Int) -> Double? {
         guard let record = historyRecord(for: bvid), record.pageCID == cid else {
             return nil
@@ -93,7 +97,7 @@ final class LibraryStore: ObservableObject {
             updatedAt: Date().timeIntervalSince1970
         )
 
-        history.removeAll(where: { $0.video.bvid == video.bvid })
+        history.removeAll(where: { $0.video.id == video.id })
         history.insert(record, at: 0)
         history = Array(history.prefix(100))
         persistHistory()
@@ -110,12 +114,12 @@ final class LibraryStore: ObservableObject {
     }
 
     func refreshSnapshots(with video: BiliVideo) {
-        if let favoriteIndex = favorites.firstIndex(where: { $0.bvid == video.bvid }) {
+        if let favoriteIndex = favorites.firstIndex(where: { $0.id == video.id }) {
             favorites[favoriteIndex] = video
             persistFavorites()
         }
 
-        if let historyIndex = history.firstIndex(where: { $0.video.bvid == video.bvid }) {
+        if let historyIndex = history.firstIndex(where: { $0.video.id == video.id }) {
             let record = history[historyIndex]
             history[historyIndex] = WatchRecord(
                 video: video,
