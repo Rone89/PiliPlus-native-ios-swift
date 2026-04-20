@@ -1,5 +1,45 @@
 import SwiftUI
 
+private struct PullRefreshOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct PullRefreshIndicator: View {
+    let offset: CGFloat
+    let threshold: CGFloat
+    let isRefreshing: Bool
+    let isArmed: Bool
+
+    var body: some View {
+        let progress = min(max(offset / max(threshold, 1), 0), 1)
+
+        return VStack(spacing: 8) {
+            if isRefreshing {
+                ProgressView()
+            } else {
+                Image(systemName: isArmed ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    .font(.title3.weight(.semibold))
+                    .rotationEffect(.degrees(isArmed ? 180 : Double(progress) * 180))
+            }
+
+            Text(isRefreshing ? "正在刷新推荐" : (isArmed ? "松手刷新" : "下拉刷新"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.thinMaterial, in: Capsule())
+        .opacity(isRefreshing || offset > 6 ? 1 : 0)
+        .offset(y: isRefreshing ? 8 : max(-44, min(offset - 44, 12)))
+        .animation(.easeInOut(duration: 0.18), value: isRefreshing)
+        .animation(.easeInOut(duration: 0.18), value: isArmed)
+    }
+}
+
 @MainActor
 final class VideoFeedViewModel: ObservableObject {
     @Published private(set) var videos: [BiliVideo] = []
@@ -12,16 +52,16 @@ final class VideoFeedViewModel: ObservableObject {
 
     func loadIfNeeded(session: BiliSession?, preferPersonalized: Bool) async {
         guard videos.isEmpty else { return }
-        await refresh(session: session, preferPersonalized: preferPersonalized)
+        await refresh(session: session, preferPersonalized: preferPersonalized, advanceCursor: false)
     }
 
-    func refresh(session: BiliSession?, preferPersonalized: Bool) async {
-        if !videos.isEmpty {
+    func refresh(session: BiliSession?, preferPersonalized: Bool, advanceCursor: Bool = true) async {
+        if advanceCursor, !videos.isEmpty {
             recommendationCursor += 1
         }
         hasMore = true
         errorMessage = nil
-        isLoading = true
+        isLoading = videos.isEmpty
         defer { isLoading = false }
 
         do {
@@ -65,13 +105,13 @@ final class VideoFeedViewModel: ObservableObject {
 struct VideoFeedView: View {
     @EnvironmentObject private var authStore: AuthStore
     @AppStorage("preference_recommend_with_account") private var recommendWithAccount = true
+    @AppStorage("preference_refresh_trigger_distance") private var refreshTriggerDistance = 110.0
 
-    private let externalRefreshToken: Int
     @StateObject private var viewModel = VideoFeedViewModel()
-
-    init(externalRefreshToken: Int = 0) {
-        self.externalRefreshToken = externalRefreshToken
-    }
+    @State private var pullOffset: CGFloat = 0
+    @State private var previousPullOffset: CGFloat = 0
+    @State private var isRefreshArmed = false
+    @State private var isPullRefreshing = false
 
     var body: some View {
         Group {
@@ -82,6 +122,12 @@ struct VideoFeedView: View {
                 ContentUnavailableView("加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
             } else {
                 ScrollView {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: PullRefreshOffsetKey.self, value: proxy.frame(in: .named("recommend-scroll")).minY)
+                    }
+                    .frame(height: 0)
+
                     VStack(alignment: .leading, spacing: 18) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("首页推荐")
@@ -117,19 +163,27 @@ struct VideoFeedView: View {
                     }
                     .padding(.vertical)
                 }
+                .coordinateSpace(name: "recommend-scroll")
+                .overlay(alignment: .top) {
+                    PullRefreshIndicator(
+                        offset: pullOffset,
+                        threshold: refreshTriggerDistance,
+                        isRefreshing: isPullRefreshing,
+                        isArmed: isRefreshArmed
+                    )
+                }
+                .onPreferenceChange(PullRefreshOffsetKey.self) { value in
+                    handlePullOffset(max(0, value))
+                }
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .task {
             await viewModel.loadIfNeeded(session: authStore.session, preferPersonalized: preferPersonalized)
         }
-        .task(id: externalRefreshToken) {
-            guard externalRefreshToken != 0 else { return }
-            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
-        }
         .task(id: recommendWithAccount) {
             guard !viewModel.videos.isEmpty else { return }
-            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
+            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized, advanceCursor: false)
         }
     }
 
@@ -139,6 +193,39 @@ struct VideoFeedView: View {
 
     private var recommendModeSubtitle: String {
         preferPersonalized ? "当前使用登录账号参与推荐" : "当前使用匿名推荐"
+    }
+
+    private func handlePullOffset(_ newOffset: CGFloat) {
+        previousPullOffset = pullOffset
+        pullOffset = newOffset
+
+        guard !isPullRefreshing else { return }
+
+        if newOffset >= refreshTriggerDistance {
+            isRefreshArmed = true
+        }
+
+        if isRefreshArmed,
+           previousPullOffset > newOffset,
+           newOffset <= refreshTriggerDistance * 0.55 {
+            triggerRefresh()
+        }
+    }
+
+    private func triggerRefresh() {
+        guard !isPullRefreshing else { return }
+        isPullRefreshing = true
+        isRefreshArmed = false
+
+        Task {
+            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
+            try? await Task.sleep(for: .milliseconds(220))
+            await MainActor.run {
+                isPullRefreshing = false
+                pullOffset = 0
+                previousPullOffset = 0
+            }
+        }
     }
 }
 

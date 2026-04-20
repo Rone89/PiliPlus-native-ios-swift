@@ -182,8 +182,8 @@ struct BiliDynamicPost: Identifiable, Hashable {
         let authorMid = BiliFormat.intValue(moduleAuthor?["mid"])
         let authorAvatarURL = BiliFormat.normalizeURL(moduleAuthor?.string("face"))
         let publishedAt = BiliFormat.intValue(moduleAuthor?["pub_ts"])
-        let commentID = BiliFormat.intValue(basic?["comment_id_str"])
-        let commentType = BiliFormat.intValue(basic?["comment_type"])
+        let commentID = BiliFormat.intValue(basic?["comment_id_str"] ?? basic?["comment_id"] ?? json["comment_id_str"] ?? json["comment_id"])
+        let commentType = BiliFormat.intValue(basic?["comment_type"] ?? json["comment_type"])
 
         let descriptionText = BiliFormat.plainText(moduleDesc?.string("text"))
 

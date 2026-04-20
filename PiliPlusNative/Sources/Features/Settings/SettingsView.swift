@@ -10,10 +10,11 @@ struct SettingsView: View {
     @State private var autoPlayNext = AppPreferences.autoPlayNext
     @State private var showDanmaku = AppPreferences.showDanmaku
     @State private var recommendWithAccount = AppPreferences.recommendWithAccount
+    @State private var refreshTriggerDistance = AppPreferences.refreshTriggerDistance
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.12"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "22"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.13"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "23"
         return "\(shortVersion) (\(build))"
     }
 
@@ -66,6 +67,17 @@ struct SettingsView: View {
                 Text(authStore.isLoggedIn ? "开启后优先带当前账号 cookie 获取首页推荐；关闭后始终走匿名推荐。" : "当前未登录，首页推荐将使用匿名模式。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("下拉刷新距离")
+                        Spacer()
+                        Text("\(Int(refreshTriggerDistance)) pt")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Slider(value: $refreshTriggerDistance, in: 70...180, step: 5)
+                }
             }
 
             Section("本地数据") {
@@ -123,6 +135,9 @@ struct SettingsView: View {
         }
         .onChange(of: recommendWithAccount) { _, newValue in
             AppPreferences.recommendWithAccount = newValue
+        }
+        .onChange(of: refreshTriggerDistance) { _, newValue in
+            AppPreferences.refreshTriggerDistance = newValue
         }
         .confirmationDialog("确认清空全部历史记录？", isPresented: $showClearHistoryConfirmation) {
             Button("清空历史", role: .destructive) {

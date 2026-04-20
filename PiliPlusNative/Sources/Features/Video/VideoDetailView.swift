@@ -1,6 +1,14 @@
 import AVKit
 import SwiftUI
 
+private struct VideoDetailSectionHeightKey: PreferenceKey {
+    static var defaultValue: [VideoDetailSection: CGFloat] = [:]
+
+    static func reduce(value: inout [VideoDetailSection: CGFloat], nextValue: () -> [VideoDetailSection: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 private enum VideoDetailSection: String, CaseIterable, Identifiable {
     case info
     case comments
@@ -243,6 +251,7 @@ struct VideoDetailView: View {
     @State private var selectedPageIndex = 0
     @State private var selectedComment: BiliComment?
     @State private var selectedSection: VideoDetailSection = .info
+    @State private var sectionHeights: [VideoDetailSection: CGFloat] = [:]
 
     init(bvid: String?, aid: Int?) {
         _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid, aid: aid))
@@ -303,11 +312,18 @@ struct VideoDetailView: View {
                 }
                 .pickerStyle(.segmented)
 
-                if selectedSection == .info {
-                    infoSection(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
-                } else {
-                    commentsSection
+                Group {
+                    if selectedSection == .info {
+                        infoSection(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
+                            .background(sectionHeightReader(for: .info))
+                    } else {
+                        commentsSection
+                            .background(sectionHeightReader(for: .comments))
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(minHeight: max(sectionHeights.values.max() ?? 0, 320), alignment: .topLeading)
+                .animation(.easeInOut(duration: 0.22), value: selectedSection)
             }
             .frame(maxWidth: 420, alignment: .leading)
             .padding()
@@ -356,6 +372,9 @@ struct VideoDetailView: View {
             if let aid = detail.video.aid {
                 CommentRepliesView(aid: aid, rootComment: comment)
             }
+        }
+        .onPreferenceChange(VideoDetailSectionHeightKey.self) { heights in
+            sectionHeights.merge(heights, uniquingKeysWith: { _, new in new })
         }
     }
 
@@ -451,6 +470,13 @@ struct VideoDetailView: View {
             get: { model.playbackRate },
             set: { model.setPlaybackRate($0) }
         )
+    }
+
+    private func sectionHeightReader(for section: VideoDetailSection) -> some View {
+        GeometryReader { proxy in
+            Color.clear
+                .preference(key: VideoDetailSectionHeightKey.self, value: [section: proxy.size.height])
+        }
     }
 
     private func infoSection(detail: BiliVideoDetail, resumeRecord: WatchRecord?, resumeIndex: Int) -> some View {

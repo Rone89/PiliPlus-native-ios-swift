@@ -57,7 +57,6 @@ final class DynamicFeedViewModel: ObservableObject {
 
         for post in items {
             if post.imageURLs.isEmpty,
-               post.kindLabel.contains("图"),
                let images = try? await BiliAPIClient.shared.fetchDynamicImages(id: post.id),
                !images.isEmpty {
                 enriched.append(post.withImageURLs(images))

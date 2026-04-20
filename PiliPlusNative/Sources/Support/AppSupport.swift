@@ -12,6 +12,7 @@ enum AppPreferences {
     private static let autoPlayNextKey = "preference_auto_play_next"
     private static let showDanmakuKey = "preference_show_danmaku"
     private static let recommendWithAccountKey = "preference_recommend_with_account"
+    private static let refreshTriggerDistanceKey = "preference_refresh_trigger_distance"
     private static let messageDeviceIDKey = "preference_message_device_id"
     private static let anonymousBuvid3Key = "preference_anonymous_buvid3"
     private static let loginDeviceIDKey = "preference_login_device_id"
@@ -60,6 +61,16 @@ enum AppPreferences {
         }
         set {
             defaults.set(newValue, forKey: recommendWithAccountKey)
+        }
+    }
+
+    static var refreshTriggerDistance: Double {
+        get {
+            let value = defaults.double(forKey: refreshTriggerDistanceKey)
+            return value == 0 ? 110 : value
+        }
+        set {
+            defaults.set(newValue, forKey: refreshTriggerDistanceKey)
         }
     }
 
