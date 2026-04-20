@@ -7,24 +7,16 @@ final class VideoFeedViewModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
     @Published var errorMessage: String?
 
-    let kind: FeedKind
-
-    private var page = 1
     private var recommendationCursor = 0
     private var hasMore = true
 
-    init(kind: FeedKind) {
-        self.kind = kind
-    }
-
-    func loadIfNeeded() async {
+    func loadIfNeeded(session: BiliSession?, preferPersonalized: Bool) async {
         guard videos.isEmpty else { return }
-        await refresh()
+        await refresh(session: session, preferPersonalized: preferPersonalized)
     }
 
-    func refresh() async {
-        page = 1
-        if kind == .recommend, !videos.isEmpty {
+    func refresh(session: BiliSession?, preferPersonalized: Bool) async {
+        if !videos.isEmpty {
             recommendationCursor += 1
         }
         hasMore = true
@@ -33,21 +25,24 @@ final class VideoFeedViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let items = try await fetchNextBatch(reset: true)
+            let items = try await fetchBatch(reset: true, session: session, preferPersonalized: preferPersonalized)
             videos = items
             hasMore = !items.isEmpty
+            if items.isEmpty {
+                errorMessage = "当前推荐流暂时为空，请稍后重试"
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    func loadMoreIfNeeded(after video: BiliVideo) async {
+    func loadMoreIfNeeded(after video: BiliVideo, session: BiliSession?, preferPersonalized: Bool) async {
         guard hasMore, !isLoading, !isLoadingMore, videos.last?.id == video.id else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
 
         do {
-            let items = try await fetchNextBatch(reset: false)
+            let items = try await fetchBatch(reset: false, session: session, preferPersonalized: preferPersonalized)
             videos.append(contentsOf: items)
             hasMore = !items.isEmpty
         } catch {
@@ -55,37 +50,33 @@ final class VideoFeedViewModel: ObservableObject {
         }
     }
 
-    private func fetchNextBatch(reset: Bool) async throws -> [BiliVideo] {
-        switch kind {
-        case .recommend:
-            let currentCursor = reset ? recommendationCursor : recommendationCursor + 1
-            let items = try await BiliAPIClient.shared.fetchRecommended(freshIndex: currentCursor)
-            recommendationCursor = currentCursor
-            return items
-        case .popular:
-            let currentPage = reset ? 1 : page
-            let items = try await BiliAPIClient.shared.fetchPopular(page: currentPage)
-            page = currentPage + 1
-            return items
-        }
+    private func fetchBatch(reset: Bool, session: BiliSession?, preferPersonalized: Bool) async throws -> [BiliVideo] {
+        let currentCursor = reset ? recommendationCursor : recommendationCursor + 1
+        let items = try await BiliAPIClient.shared.fetchRecommended(
+            freshIndex: currentCursor,
+            session: session,
+            preferPersonalized: preferPersonalized
+        )
+        recommendationCursor = currentCursor
+        return items
     }
 }
 
 struct VideoFeedView: View {
-    private let kind: FeedKind
-    private let externalRefreshToken: Int
-    @StateObject private var viewModel: VideoFeedViewModel
+    @EnvironmentObject private var authStore: AuthStore
+    @AppStorage("preference_recommend_with_account") private var recommendWithAccount = true
 
-    init(kind: FeedKind, externalRefreshToken: Int = 0) {
-        self.kind = kind
+    private let externalRefreshToken: Int
+    @StateObject private var viewModel = VideoFeedViewModel()
+
+    init(externalRefreshToken: Int = 0) {
         self.externalRefreshToken = externalRefreshToken
-        _viewModel = StateObject(wrappedValue: VideoFeedViewModel(kind: kind))
     }
 
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.videos.isEmpty {
-                ProgressView("正在加载\(kind.title)")
+                ProgressView("正在加载首页推荐")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let errorMessage = viewModel.errorMessage, viewModel.videos.isEmpty {
                 ContentUnavailableView("加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
@@ -93,9 +84,9 @@ struct VideoFeedView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(kind.title)
+                            Text("首页推荐")
                                 .font(.largeTitle.bold())
-                            Text(kind.subtitle)
+                            Text(recommendModeSubtitle)
                                 .foregroundStyle(.secondary)
                         }
                         .padding(.horizontal)
@@ -109,7 +100,11 @@ struct VideoFeedView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .task {
-                                    await viewModel.loadMoreIfNeeded(after: video)
+                                    await viewModel.loadMoreIfNeeded(
+                                        after: video,
+                                        session: authStore.session,
+                                        preferPersonalized: preferPersonalized
+                                    )
                                 }
                             }
 
@@ -123,19 +118,30 @@ struct VideoFeedView: View {
                     .padding(.vertical)
                 }
                 .refreshable {
-                    await viewModel.refresh()
+                    await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
                 }
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle(kind.title)
         .task {
-            await viewModel.loadIfNeeded()
+            await viewModel.loadIfNeeded(session: authStore.session, preferPersonalized: preferPersonalized)
         }
         .task(id: externalRefreshToken) {
             guard externalRefreshToken != 0 else { return }
-            await viewModel.refresh()
+            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
         }
+        .task(id: recommendWithAccount) {
+            guard !viewModel.videos.isEmpty else { return }
+            await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
+        }
+    }
+
+    private var preferPersonalized: Bool {
+        recommendWithAccount && authStore.isLoggedIn
+    }
+
+    private var recommendModeSubtitle: String {
+        preferPersonalized ? "当前使用登录账号参与推荐" : "当前使用匿名推荐"
     }
 }
 

@@ -11,6 +11,7 @@ enum AppPreferences {
     private static let playbackRateKey = "preference_playback_rate"
     private static let autoPlayNextKey = "preference_auto_play_next"
     private static let showDanmakuKey = "preference_show_danmaku"
+    private static let recommendWithAccountKey = "preference_recommend_with_account"
     private static let messageDeviceIDKey = "preference_message_device_id"
     private static let anonymousBuvid3Key = "preference_anonymous_buvid3"
     private static let loginDeviceIDKey = "preference_login_device_id"
@@ -47,6 +48,18 @@ enum AppPreferences {
         }
         set {
             defaults.set(newValue, forKey: showDanmakuKey)
+        }
+    }
+
+    static var recommendWithAccount: Bool {
+        get {
+            if defaults.object(forKey: recommendWithAccountKey) == nil {
+                return true
+            }
+            return defaults.bool(forKey: recommendWithAccountKey)
+        }
+        set {
+            defaults.set(newValue, forKey: recommendWithAccountKey)
         }
     }
 
@@ -109,26 +122,15 @@ enum AppPreferences {
 
 enum FeedKind: String, CaseIterable, Identifiable {
     case recommend
-    case popular
 
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .recommend:
-            return "推荐"
-        case .popular:
-            return "热门"
-        }
+        "推荐"
     }
 
     var subtitle: String {
-        switch self {
-        case .recommend:
-            return "基于 Bilibili 推荐接口的原生 Swift 视频流"
-        case .popular:
-            return "全站热门视频榜单"
-        }
+        "根据当前模式加载首页推荐流"
     }
 }
 

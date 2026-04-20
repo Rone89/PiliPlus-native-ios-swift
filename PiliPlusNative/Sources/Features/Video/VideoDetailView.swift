@@ -164,7 +164,7 @@ struct VideoDetailView: View {
                     }
                 }
                 .padding()
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))
@@ -226,12 +226,17 @@ struct VideoDetailView: View {
                         .font(.headline)
 
                     ForEach(detail.related) { video in
-                        NavigationLink {
-                            VideoDetailView(bvid: video.bvid, aid: video.aid)
-                        } label: {
-                            VideoCardView(video: video)
+                        HStack {
+                            Spacer(minLength: 0)
+                            NavigationLink {
+                                VideoDetailView(bvid: video.bvid, aid: video.aid)
+                            } label: {
+                                VideoCardView(video: video)
+                                    .frame(maxWidth: 420)
+                            }
+                            .buttonStyle(.plain)
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -263,6 +268,7 @@ struct VideoDetailView: View {
             Text(detail.video.title)
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {

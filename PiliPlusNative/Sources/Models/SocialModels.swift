@@ -239,6 +239,66 @@ struct BiliDynamicPost: Identifiable, Hashable {
         self.forwardCount = BiliFormat.countText(moduleStat?.dictionary("forward")?["count"])
         self.isLiked = (moduleStat?.dictionary("like")?["status"] as? Bool) ?? false
     }
+
+    func withImageURLs(_ urls: [URL]) -> BiliDynamicPost {
+        BiliDynamicPost(
+            id: id,
+            authorName: authorName,
+            authorMid: authorMid,
+            authorAvatarURL: authorAvatarURL,
+            commentID: commentID,
+            commentType: commentType,
+            text: text,
+            title: title,
+            coverURL: urls.first ?? coverURL,
+            imageURLs: urls,
+            videoBVID: videoBVID,
+            publishedAt: publishedAt,
+            kindLabel: kindLabel,
+            likeCount: likeCount,
+            commentCount: commentCount,
+            forwardCount: forwardCount,
+            isLiked: isLiked
+        )
+    }
+
+    private init(
+        id: String,
+        authorName: String,
+        authorMid: Int?,
+        authorAvatarURL: URL?,
+        commentID: Int?,
+        commentType: Int?,
+        text: String,
+        title: String?,
+        coverURL: URL?,
+        imageURLs: [URL],
+        videoBVID: String?,
+        publishedAt: Int?,
+        kindLabel: String,
+        likeCount: String?,
+        commentCount: String?,
+        forwardCount: String?,
+        isLiked: Bool
+    ) {
+        self.id = id
+        self.authorName = authorName
+        self.authorMid = authorMid
+        self.authorAvatarURL = authorAvatarURL
+        self.commentID = commentID
+        self.commentType = commentType
+        self.text = text
+        self.title = title
+        self.coverURL = coverURL
+        self.imageURLs = imageURLs
+        self.videoBVID = videoBVID
+        self.publishedAt = publishedAt
+        self.kindLabel = kindLabel
+        self.likeCount = likeCount
+        self.commentCount = commentCount
+        self.forwardCount = forwardCount
+        self.isLiked = isLiked
+    }
 }
 
 struct BiliComposeDynamicResult: Hashable {

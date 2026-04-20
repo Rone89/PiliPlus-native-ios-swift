@@ -219,6 +219,7 @@ struct DynamicCard: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
             } else if let coverURL = post.coverURL {
                 AsyncImage(url: coverURL) { phase in
                     switch phase {
@@ -236,6 +237,7 @@ struct DynamicCard: View {
                 }
                 .frame(height: 200)
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .center)
             }
 
             if let bvid = post.videoBVID {

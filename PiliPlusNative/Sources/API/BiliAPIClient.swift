@@ -42,12 +42,7 @@ actor BiliAPIClient {
         self.authenticatedSession = URLSession(configuration: authenticatedConfiguration)
     }
 
-    func fetchRecommended(freshIndex: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
-        let appVideos = try await fetchRecommendedApp(index: freshIndex, pageSize: pageSize)
-        if !appVideos.isEmpty {
-            return appVideos
-        }
-
+    func fetchRecommended(freshIndex: Int, session: BiliSession? = nil, preferPersonalized: Bool = false, pageSize: Int = 20) async throws -> [BiliVideo] {
         let payload = try await request(
             path: "/x/web-interface/wbi/index/top/feed/rcmd",
             query: try await signedQuery([
@@ -59,11 +54,7 @@ actor BiliAPIClient {
                 "brush": "\(max(freshIndex, 0))",
                 "fresh_type": "4"
             ]),
-            headers: [
-                "Referer": "https://www.bilibili.com",
-                "Origin": "https://www.bilibili.com",
-                "Cookie": anonymousCookieHeader
-            ]
+            headers: personalizedRecommendHeaders(session: preferPersonalized ? session : nil)
         )
 
         let items = payload.data.array("item")
@@ -79,7 +70,23 @@ actor BiliAPIClient {
             return videos
         }
 
-        return try await fetchPopular(page: max(freshIndex + 1, 1), pageSize: pageSize)
+        return try await fetchRecommendedApp(index: freshIndex, pageSize: pageSize)
+    }
+
+    private func personalizedRecommendHeaders(session: BiliSession?) -> [String: String] {
+        if let session, session.isLoggedIn {
+            return [
+                "Referer": "https://www.bilibili.com",
+                "Origin": "https://www.bilibili.com",
+                "Cookie": session.cookieHeader
+            ]
+        }
+
+        return [
+            "Referer": "https://www.bilibili.com",
+            "Origin": "https://www.bilibili.com",
+            "Cookie": anonymousCookieHeader
+        ]
     }
 
     private func fetchRecommendedApp(index: Int, pageSize: Int) async throws -> [BiliVideo] {
@@ -505,10 +512,32 @@ actor BiliAPIClient {
         )
 
         guard let item = payload.data.dictionary("item"),
-              let post = BiliDynamicPost(json: item) else {
+              var post = BiliDynamicPost(json: item) else {
             throw APIError.invalidResponse("动态详情解析失败")
         }
+        if post.imageURLs.isEmpty, let images = try? await fetchDynamicImages(id: id), !images.isEmpty {
+            post = post.withImageURLs(images)
+        }
         return post
+    }
+
+    func fetchDynamicImages(id: String) async throws -> [URL] {
+        let payload = try await request(
+            path: "/x/polymer/web-dynamic/v1/detail/pic",
+            query: [
+                "id": id,
+                "web_location": "333.1368"
+            ]
+        )
+
+        let dataList = payload.dataList.isEmpty ? payload.data.array("list") : payload.dataList
+        return dataList.compactMap { item in
+            BiliFormat.normalizeURL(
+                item.string("url") ??
+                item.string("src") ??
+                item.dictionary("img_src")?.string("url")
+            )
+        }
     }
 
     func createTextDynamic(session: BiliSession, text: String) async throws -> BiliComposeDynamicResult {

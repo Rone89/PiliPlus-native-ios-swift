@@ -9,10 +9,11 @@ struct SettingsView: View {
     @State private var playbackRate = AppPreferences.playbackRate
     @State private var autoPlayNext = AppPreferences.autoPlayNext
     @State private var showDanmaku = AppPreferences.showDanmaku
+    @State private var recommendWithAccount = AppPreferences.recommendWithAccount
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.10"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "20"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.11"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "21"
         return "\(shortVersion) (\(build))"
     }
 
@@ -59,6 +60,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section("首页推荐") {
+                Toggle("登录账号参与推荐", isOn: $recommendWithAccount)
+                    .disabled(!authStore.isLoggedIn)
+                Text(authStore.isLoggedIn ? "开启后优先带当前账号 cookie 获取首页推荐；关闭后始终走匿名推荐。" : "当前未登录，首页推荐将使用匿名模式。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("本地数据") {
                 LabeledContent("收藏数量", value: "\(libraryStore.favorites.count)")
                 LabeledContent("历史数量", value: "\(libraryStore.history.count)")
@@ -88,16 +97,12 @@ struct SettingsView: View {
             }
 
             Section("当前已支持") {
-                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、多账号基础、个人中心同步、动态流、动态文本发布、动态详情与评论、消息中心、私信会话与发送、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
+                Text("首页推荐、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、多账号基础、个人中心同步、动态流、动态详情与评论、消息中心、私信会话与发送、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
             }
 
             Section("游客模式") {
-                Text("游客模式下可直接使用：首页推荐、热门、搜索、搜索建议、视频详情、播放、评论查看、本地收藏与历史。")
+                Text("游客模式下可直接使用：首页推荐、搜索、搜索建议、视频详情、播放、评论查看、本地收藏与历史。")
                 Text("登录后增强：动态、消息中心、私信、弹幕发送、个人中心同步、多账号切换。")
-            }
-
-            Section("后续可继续补完") {
-                Text("私信发送完整闭环、动态发布/互动、账号多实例同步、离线缓存、更多弹幕交互和消息中心细分等功能，可以继续在当前原生架构上扩展。")
             }
 
             Section("相关链接") {
@@ -115,6 +120,9 @@ struct SettingsView: View {
         }
         .onChange(of: showDanmaku) { _, newValue in
             AppPreferences.showDanmaku = newValue
+        }
+        .onChange(of: recommendWithAccount) { _, newValue in
+            AppPreferences.recommendWithAccount = newValue
         }
         .confirmationDialog("确认清空全部历史记录？", isPresented: $showClearHistoryConfirmation) {
             Button("清空历史", role: .destructive) {
