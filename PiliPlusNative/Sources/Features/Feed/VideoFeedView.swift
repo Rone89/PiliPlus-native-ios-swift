@@ -24,7 +24,7 @@ final class VideoFeedViewModel: ObservableObject {
 
     func refresh() async {
         page = 1
-        if kind == .recommend {
+        if kind == .recommend, !videos.isEmpty {
             recommendationCursor += 1
         }
         hasMore = true

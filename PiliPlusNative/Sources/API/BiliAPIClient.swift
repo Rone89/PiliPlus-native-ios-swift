@@ -43,6 +43,11 @@ actor BiliAPIClient {
     }
 
     func fetchRecommended(freshIndex: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
+        let appVideos = try await fetchRecommendedApp(index: freshIndex, pageSize: pageSize)
+        if !appVideos.isEmpty {
+            return appVideos
+        }
+
         let payload = try await request(
             path: "/x/web-interface/wbi/index/top/feed/rcmd",
             query: try await signedQuery([
@@ -70,10 +75,11 @@ actor BiliAPIClient {
             return BiliVideo(json: item)
         }
 
-        if videos.isEmpty {
-            return try await fetchRecommendedApp(index: freshIndex, pageSize: pageSize)
+        if !videos.isEmpty {
+            return videos
         }
-        return videos
+
+        return try await fetchPopular(page: max(freshIndex + 1, 1), pageSize: pageSize)
     }
 
     private func fetchRecommendedApp(index: Int, pageSize: Int) async throws -> [BiliVideo] {
@@ -1189,6 +1195,9 @@ actor BiliAPIClient {
             "User-Agent": Self.appUserAgent,
             "Cookie": anonymousCookieHeader,
             "buvid": AppPreferences.anonymousBuvid3,
+            "fp_local": AppPreferences.appFingerprint,
+            "fp_remote": AppPreferences.appFingerprint,
+            "session_id": "11111111",
             "env": "prod",
             "app-key": "android_hd",
             "x-bili-trace-id": appTraceID,
@@ -1379,7 +1388,7 @@ actor BiliAPIClient {
         }
 
         let encrypted = encryptedData as Data
-        return Self.percentEncode(encrypted.base64EncodedString())
+        return encrypted.base64EncodedString()
     }
 
     private func publicKeyData(fromPEM pem: String) throws -> Data {

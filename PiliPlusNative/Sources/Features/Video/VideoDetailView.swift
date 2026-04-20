@@ -95,6 +95,7 @@ final class VideoDetailViewModel: ObservableObject {
 
 struct VideoDetailView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @StateObject private var viewModel: VideoDetailViewModel
     @State private var selectedPageIndex = 0
@@ -142,7 +143,8 @@ struct VideoDetailView: View {
         } ?? 0
 
         return GeometryReader { proxy in
-            let isWide = proxy.size.width >= 900
+            let contentWidth = min(max(proxy.size.width - 32, 0), 420)
+            let isWide = horizontalSizeClass == .regular && proxy.size.width >= 1000 && proxy.size.height >= 700
 
             ScrollView {
                 Group {
@@ -158,6 +160,7 @@ struct VideoDetailView: View {
                             leftColumn(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
                             rightColumn(detail: detail)
                         }
+                        .frame(maxWidth: contentWidth, alignment: .topLeading)
                     }
                 }
                 .padding()

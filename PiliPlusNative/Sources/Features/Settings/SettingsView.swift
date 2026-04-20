@@ -11,8 +11,8 @@ struct SettingsView: View {
     @State private var showDanmaku = AppPreferences.showDanmaku
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.9"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "19"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.10"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "20"
         return "\(shortVersion) (\(build))"
     }
 

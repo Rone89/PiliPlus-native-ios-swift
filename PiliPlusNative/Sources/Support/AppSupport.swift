@@ -14,6 +14,7 @@ enum AppPreferences {
     private static let messageDeviceIDKey = "preference_message_device_id"
     private static let anonymousBuvid3Key = "preference_anonymous_buvid3"
     private static let loginDeviceIDKey = "preference_login_device_id"
+    private static let appFingerprintKey = "preference_app_fingerprint"
 
     static var playbackRate: Double {
         get {
@@ -88,6 +89,20 @@ enum AppPreferences {
         }
         set {
             defaults.set(newValue, forKey: loginDeviceIDKey)
+        }
+    }
+
+    static var appFingerprint: String {
+        get {
+            if let existing = defaults.string(forKey: appFingerprintKey), !existing.isEmpty {
+                return existing
+            }
+            let generated = String(repeating: "1", count: 64)
+            defaults.set(generated, forKey: appFingerprintKey)
+            return generated
+        }
+        set {
+            defaults.set(newValue, forKey: appFingerprintKey)
         }
     }
 }

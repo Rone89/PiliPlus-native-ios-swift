@@ -34,6 +34,7 @@ final class LoginViewModel: ObservableObject {
     @Published var isLoggingInWithSMS = false
 
     private var pollTask: Task<Void, Never>?
+    private var suspendedQRCodeInfo: QRCodeLoginInfo?
 
     deinit {
         pollTask?.cancel()
@@ -56,6 +57,7 @@ final class LoginViewModel: ObservableObject {
 
     func refreshQRCode(authStore: AuthStore) async {
         pollTask?.cancel()
+        suspendedQRCodeInfo = nil
         isLoading = true
         errorMessage = nil
         statusText = "正在生成二维码"
@@ -117,6 +119,20 @@ final class LoginViewModel: ObservableObject {
         }
     }
 
+    func pauseQRCodePolling() {
+        guard let qrInfo else { return }
+        suspendedQRCodeInfo = qrInfo
+        pollTask?.cancel()
+    }
+
+    func resumeQRCodePollingIfNeeded(authStore: AuthStore) async {
+        guard selectedMethod == .qrcode else { return }
+        guard authStore.currentSessionMID == nil else { return }
+        guard let info = suspendedQRCodeInfo ?? qrInfo else { return }
+        suspendedQRCodeInfo = nil
+        beginPolling(info: info, authStore: authStore)
+    }
+
     private func beginPolling(info: QRCodeLoginInfo, authStore: AuthStore) {
         pollTask = Task { [weak self] in
             guard let self else { return }
@@ -165,6 +181,7 @@ final class LoginViewModel: ObservableObject {
                     }
                 } catch {
                     await MainActor.run {
+                        guard self.suspendedQRCodeInfo == nil else { return }
                         self.errorMessage = error.localizedDescription
                         self.statusText = "登录轮询失败"
                     }
@@ -179,6 +196,7 @@ final class LoginViewModel: ObservableObject {
 
 struct LoginView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var authStore: AuthStore
 
     @StateObject private var viewModel = LoginViewModel()
@@ -210,6 +228,18 @@ struct LoginView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await viewModel.start(authStore: authStore)
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                switch newPhase {
+                case .background, .inactive:
+                    viewModel.pauseQRCodePolling()
+                case .active:
+                    Task {
+                        await viewModel.resumeQRCodePollingIfNeeded(authStore: authStore)
+                    }
+                @unknown default:
+                    break
+                }
             }
             .onChange(of: authStore.currentSessionMID) { _, currentMID in
                 if currentMID != nil {
