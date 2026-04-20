@@ -125,6 +125,8 @@ struct DynamicDetailView: View {
                         DynamicCommentRepliesView(oid: oid, type: type, rootComment: comment)
                     }
                 }
+            } else {
+                ContentUnavailableView("暂无动态内容", systemImage: "dot.radiowaves.left.and.right")
             }
         }
         .navigationTitle("动态详情")

@@ -945,20 +945,17 @@ actor BiliAPIClient {
     }
 
     private func fetchVideoDetail(query: [String: String]) async throws -> BiliVideoDetail {
-        async let detailPayload = fetchViewPayload(query: query)
-        async let relatedPayload = request(
-            path: "/x/web-interface/archive/related",
-            query: query
-        )
-
-        let detail = try await detailPayload
+        let detail = try await fetchViewPayload(query: query)
         guard let video = BiliVideo(json: detail.data.raw) else {
             throw APIError.invalidResponse("视频详情解析失败")
         }
 
-        let relatedEnvelope = try await relatedPayload
         let pages = detail.data.array("pages").compactMap(BiliVideoPage.init(json:))
-        let related = relatedEnvelope.dataList.compactMap(BiliVideo.init(json:))
+        let relatedEnvelope = try? await request(
+            path: "/x/web-interface/archive/related",
+            query: query
+        )
+        let related = relatedEnvelope?.dataList.compactMap(BiliVideo.init(json:)) ?? []
         return BiliVideoDetail(video: video, pages: pages, related: related)
     }
 

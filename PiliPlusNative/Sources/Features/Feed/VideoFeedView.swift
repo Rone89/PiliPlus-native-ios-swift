@@ -65,10 +65,12 @@ final class VideoFeedViewModel: ObservableObject {
 
 struct VideoFeedView: View {
     private let kind: FeedKind
+    private let externalRefreshToken: Int
     @StateObject private var viewModel: VideoFeedViewModel
 
-    init(kind: FeedKind) {
+    init(kind: FeedKind, externalRefreshToken: Int = 0) {
         self.kind = kind
+        self.externalRefreshToken = externalRefreshToken
         _viewModel = StateObject(wrappedValue: VideoFeedViewModel(kind: kind))
     }
 
@@ -121,6 +123,10 @@ struct VideoFeedView: View {
         .navigationTitle(kind.title)
         .task {
             await viewModel.loadIfNeeded()
+        }
+        .task(id: externalRefreshToken) {
+            guard externalRefreshToken != 0 else { return }
+            await viewModel.refresh()
         }
     }
 }

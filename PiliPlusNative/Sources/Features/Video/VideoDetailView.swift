@@ -130,6 +130,8 @@ struct VideoDetailView: View {
             ContentUnavailableView("视频加载失败", systemImage: "play.slash", description: Text(errorMessage))
         } else if let detail = viewModel.detail {
             loadedContent(detail: detail)
+        } else {
+            ContentUnavailableView("暂无视频内容", systemImage: "play.slash")
         }
     }
 

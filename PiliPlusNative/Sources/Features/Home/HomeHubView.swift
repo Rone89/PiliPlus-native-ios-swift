@@ -5,20 +5,16 @@ struct HomeHubView: View {
     @State private var refreshSeed = 0
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                Picker("首页内容", selection: $selectedKind) {
-                    ForEach(FeedKind.allCases) { kind in
-                        Text(kind.title).tag(kind)
-                    }
+        VStack(spacing: 0) {
+            Picker("首页内容", selection: $selectedKind) {
+                ForEach(FeedKind.allCases) { kind in
+                    Text(kind.title).tag(kind)
                 }
-                .pickerStyle(.segmented)
-                .padding()
-
-                VideoFeedView(kind: selectedKind)
-                    .id("\(selectedKind.rawValue)-\(refreshSeed)")
             }
-            .frame(maxWidth: .infinity, alignment: .top)
+            .pickerStyle(.segmented)
+            .padding()
+
+            VideoFeedView(kind: selectedKind, externalRefreshToken: refreshSeed)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("首页")
