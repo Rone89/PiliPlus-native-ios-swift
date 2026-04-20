@@ -182,7 +182,14 @@ struct BiliDynamicPost: Identifiable, Hashable {
         let authorMid = BiliFormat.intValue(moduleAuthor?["mid"])
         let authorAvatarURL = BiliFormat.normalizeURL(moduleAuthor?.string("face"))
         let publishedAt = BiliFormat.intValue(moduleAuthor?["pub_ts"])
-        let commentID = BiliFormat.intValue(basic?["comment_id_str"] ?? basic?["comment_id"] ?? json["comment_id_str"] ?? json["comment_id"])
+        let commentID = BiliFormat.intValue(
+            basic?["comment_id_str"] ??
+            basic?["comment_id"] ??
+            basic?["rid_str"] ??
+            json["comment_id_str"] ??
+            json["comment_id"] ??
+            json["rid_str"]
+        )
         let commentType = BiliFormat.intValue(basic?["comment_type"] ?? json["comment_type"])
 
         let descriptionText = BiliFormat.plainText(moduleDesc?.string("text"))
@@ -205,12 +212,23 @@ struct BiliDynamicPost: Identifiable, Hashable {
                 summaryText = [descriptionText, BiliFormat.plainText(summary.string("text"))]
                     .filter { !$0.isEmpty }
                     .joined(separator: "\n")
+                let richNodePics = summary.array("rich_text_nodes").flatMap { node in
+                    node.array("pics").compactMap {
+                        BiliFormat.normalizeURL($0.string("url") ?? $0.string("src") ?? $0.string("live_url"))
+                    }
+                }
+                imageURLs.append(contentsOf: richNodePics)
             }
-            imageURLs = (opus.array("pics").compactMap { BiliFormat.normalizeURL($0.string("url")) })
+            imageURLs.append(contentsOf: opus.array("pics").compactMap {
+                BiliFormat.normalizeURL($0.string("url") ?? $0.string("src") ?? $0.string("live_url"))
+            })
+            imageURLs = Array(NSOrderedSet(array: imageURLs)) as? [URL] ?? imageURLs
             coverURL = imageURLs.first
             kindLabel = imageURLs.isEmpty ? "文字动态" : "图文动态"
         } else if let draw = major?.dictionary("draw") {
-            imageURLs = draw.array("items").compactMap { BiliFormat.normalizeURL($0.string("src")) }
+            imageURLs = draw.array("items").compactMap {
+                BiliFormat.normalizeURL($0.string("src") ?? $0.string("url") ?? $0.string("live_url"))
+            }
             coverURL = imageURLs.first
             kindLabel = "图片动态"
         } else if let article = major?.dictionary("article") {
