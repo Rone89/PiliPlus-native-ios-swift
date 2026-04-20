@@ -168,8 +168,8 @@ struct LoginView: View {
             .task {
                 await viewModel.start(authStore: authStore)
             }
-            .onReceive(authStore.$session) { session in
-                if session?.isLoggedIn == true {
+            .onChange(of: authStore.currentSessionMID) { _, currentMID in
+                if currentMID != nil {
                     dismiss()
                 }
             }
