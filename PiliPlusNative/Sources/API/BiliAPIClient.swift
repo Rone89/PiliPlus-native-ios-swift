@@ -181,7 +181,8 @@ actor BiliAPIClient {
             path: "/x/passport-tv-login/qrcode/poll",
             method: "POST",
             query: params,
-            headers: tvHeaders
+            headers: tvHeaders,
+            session: anonymousSession
         )
 
         switch payload.code {
