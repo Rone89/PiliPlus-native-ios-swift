@@ -11,8 +11,8 @@ struct SettingsView: View {
     @State private var showDanmaku = AppPreferences.showDanmaku
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.3.1"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.6.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "9"
         return "\(shortVersion) (\(build))"
     }
 
@@ -26,9 +26,16 @@ struct SettingsView: View {
 
             Section("账号") {
                 LabeledContent("登录状态", value: authStore.isLoggedIn ? "已登录" : "未登录")
+                LabeledContent("已保存账号", value: "\(authStore.savedSessions.count)")
                 if let user = authStore.currentUser {
                     LabeledContent("当前账号", value: user.name)
                     LabeledContent("UID", value: "\(user.mid)")
+                }
+
+                NavigationLink {
+                    AccountManagementView()
+                } label: {
+                    Label("打开账号管理", systemImage: "person.2")
                 }
 
                 if authStore.isLoggedIn {
@@ -75,7 +82,7 @@ struct SettingsView: View {
             }
 
             Section("当前已支持") {
-                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、个人中心同步、动态、私信会话只读、视频详情、评论区与回复、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
+                Text("推荐、热门、搜索、搜索建议、BV/链接直达、UP 主主页、扫码登录、多账号基础、个人中心同步、动态流、动态文本发布、动态详情与评论、消息中心、私信会话与发送、弹幕查看与发送、本地收藏、继续播放、观看历史、倍速控制、自动播放下一 P，以及 GitHub Actions unsigned IPA 发布流程。")
             }
 
             Section("后续可继续补完") {

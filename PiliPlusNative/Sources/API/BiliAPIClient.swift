@@ -289,6 +289,31 @@ actor BiliAPIClient {
         return (posts, nextOffset, hasMore)
     }
 
+    func fetchDynamicDetail(id: String, session: BiliSession?) async throws -> BiliDynamicPost {
+        var query: [String: String] = [
+            "timezone_offset": "-480",
+            "id": id,
+            "features": dynamicFeatures,
+            "web_location": "333.1330"
+        ]
+
+        if let session, session.isLoggedIn, !session.csrf.isEmpty {
+            query["csrf"] = session.csrf
+        }
+
+        let payload = try await request(
+            path: "/x/polymer/web-dynamic/v1/detail",
+            query: query,
+            headers: session.map { authenticatedHeaders(session: $0) } ?? [:]
+        )
+
+        guard let item = payload.data.dictionary("item"),
+              let post = BiliDynamicPost(json: item) else {
+            throw APIError.invalidResponse("动态详情解析失败")
+        }
+        return post
+    }
+
     func createTextDynamic(session: BiliSession, text: String) async throws -> BiliComposeDynamicResult {
         let payload = try await request(
             baseURL: vcBaseURL,
@@ -779,13 +804,13 @@ actor BiliAPIClient {
         try await fetchVideoDetail(query: ["aid": "\(aid)"])
     }
 
-    func fetchComments(aid: Int, nextOffset: String = "") async throws -> BiliCommentPage {
+    func fetchComments(oid: Int, type: Int = 1, nextOffset: String = "") async throws -> BiliCommentPage {
         let escapedOffset = nextOffset.replacingOccurrences(of: "\"", with: "\\\"")
         let payload = try await request(
             path: "/x/v2/reply/main",
             query: [
-                "oid": "\(aid)",
-                "type": "1",
+                "oid": "\(oid)",
+                "type": "\(type)",
                 "mode": "3",
                 "pagination_str": "{\"offset\":\"\(escapedOffset)\"}"
             ]
@@ -799,19 +824,36 @@ actor BiliAPIClient {
         return BiliCommentPage(comments: comments, nextOffset: next, isEnd: isEnd)
     }
 
-    func fetchCommentReplies(aid: Int, rootCommentID: Int, page: Int) async throws -> [BiliComment] {
+    func fetchCommentReplies(oid: Int, rootCommentID: Int, type: Int = 1, page: Int) async throws -> [BiliComment] {
         let payload = try await request(
             path: "/x/v2/reply/reply",
             query: [
-                "oid": "\(aid)",
+                "oid": "\(oid)",
                 "root": "\(rootCommentID)",
                 "pn": "\(page)",
-                "type": "1",
+                "type": "\(type)",
                 "sort": "1"
             ]
         )
 
         return payload.data.array("replies").compactMap(BiliComment.init(json:))
+    }
+
+    func toggleDynamicLike(session: BiliSession, dynamicID: String, currentlyLiked: Bool) async throws {
+        let _ = try await request(
+            path: "/x/dynamic/feed/dyn/thumb",
+            method: "POST",
+            query: [
+                "csrf": session.csrf
+            ],
+            body: [
+                "dyn_id_str": dynamicID,
+                "up": currentlyLiked ? "2" : "1",
+                "spmid": "333.1365.0.0"
+            ],
+            contentType: .form,
+            headers: authenticatedHeaders(session: session, referer: "https://t.bilibili.com/")
+        )
     }
 
     func fetchPlayback(bvid: String, cid: Int) async throws -> BiliPlayback {

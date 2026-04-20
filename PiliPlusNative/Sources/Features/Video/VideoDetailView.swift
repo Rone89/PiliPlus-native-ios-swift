@@ -69,7 +69,7 @@ final class VideoDetailViewModel: ObservableObject {
         }
 
         do {
-            let page = try await BiliAPIClient.shared.fetchComments(aid: aid, nextOffset: reset ? "" : commentsNextOffset)
+            let page = try await BiliAPIClient.shared.fetchComments(oid: aid, type: 1, nextOffset: reset ? "" : commentsNextOffset)
             if reset {
                 comments = page.comments
             } else {

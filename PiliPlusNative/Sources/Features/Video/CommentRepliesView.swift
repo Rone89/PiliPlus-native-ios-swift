@@ -30,7 +30,7 @@ final class CommentRepliesViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let items = try await BiliAPIClient.shared.fetchCommentReplies(aid: aid, rootCommentID: rootCommentID, page: page)
+            let items = try await BiliAPIClient.shared.fetchCommentReplies(oid: aid, rootCommentID: rootCommentID, type: 1, page: page)
             replies = items
             page = 2
             hasMore = items.count >= 20
@@ -45,7 +45,7 @@ final class CommentRepliesViewModel: ObservableObject {
         defer { isLoadingMore = false }
 
         do {
-            let items = try await BiliAPIClient.shared.fetchCommentReplies(aid: aid, rootCommentID: rootCommentID, page: page)
+            let items = try await BiliAPIClient.shared.fetchCommentReplies(oid: aid, rootCommentID: rootCommentID, type: 1, page: page)
             replies.append(contentsOf: items)
             page += 1
             hasMore = items.count >= 20

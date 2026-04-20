@@ -5,10 +5,17 @@ struct BiliSessionCookie: Codable, Hashable {
     let value: String
 }
 
-struct BiliSession: Codable, Hashable {
+struct BiliSession: Codable, Hashable, Identifiable {
     let accessToken: String?
     let refreshToken: String?
     let cookies: [BiliSessionCookie]
+
+    var id: String {
+        if let mid {
+            return "\(mid)"
+        }
+        return cookieHeader
+    }
 
     var isLoggedIn: Bool {
         cookieValue(named: "SESSDATA") != nil
@@ -141,6 +148,8 @@ struct BiliDynamicPost: Identifiable, Hashable {
     let authorName: String
     let authorMid: Int?
     let authorAvatarURL: URL?
+    let commentID: Int?
+    let commentType: Int?
     let text: String
     let title: String?
     let coverURL: URL?
@@ -148,19 +157,27 @@ struct BiliDynamicPost: Identifiable, Hashable {
     let videoBVID: String?
     let publishedAt: Int?
     let kindLabel: String
+    let likeCount: String?
+    let commentCount: String?
+    let forwardCount: String?
+    let isLiked: Bool
 
     init?(json: [String: Any]) {
         guard let id = json.string("id_str") ?? json.string("id") else { return nil }
+        let basic = json.dictionary("basic")
         let modules = json.dictionary("modules")
         let moduleAuthor = modules?.dictionary("module_author")
         let moduleDynamic = modules?.dictionary("module_dynamic")
         let moduleDesc = moduleDynamic?.dictionary("desc")
         let major = moduleDynamic?.dictionary("major")
+        let moduleStat = modules?.dictionary("module_stat")
 
         let authorName = BiliFormat.plainText(moduleAuthor?.string("name"))
         let authorMid = BiliFormat.intValue(moduleAuthor?["mid"])
         let authorAvatarURL = BiliFormat.normalizeURL(moduleAuthor?.string("face"))
         let publishedAt = BiliFormat.intValue(moduleAuthor?["pub_ts"])
+        let commentID = BiliFormat.intValue(basic?["comment_id_str"])
+        let commentType = BiliFormat.intValue(basic?["comment_type"])
 
         let descriptionText = BiliFormat.plainText(moduleDesc?.string("text"))
 
@@ -202,6 +219,8 @@ struct BiliDynamicPost: Identifiable, Hashable {
         self.authorName = authorName.isEmpty ? "未知用户" : authorName
         self.authorMid = authorMid
         self.authorAvatarURL = authorAvatarURL
+        self.commentID = commentID
+        self.commentType = commentType
         self.text = text
         self.title = title
         self.coverURL = coverURL
@@ -209,6 +228,10 @@ struct BiliDynamicPost: Identifiable, Hashable {
         self.videoBVID = videoBVID
         self.publishedAt = publishedAt
         self.kindLabel = kindLabel
+        self.likeCount = BiliFormat.countText(moduleStat?.dictionary("like")?["count"])
+        self.commentCount = BiliFormat.countText(moduleStat?.dictionary("comment")?["count"])
+        self.forwardCount = BiliFormat.countText(moduleStat?.dictionary("forward")?["count"])
+        self.isLiked = (moduleStat?.dictionary("like")?["status"] as? Bool) ?? false
     }
 }
 

@@ -192,6 +192,14 @@ struct LibraryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+
+                        NavigationLink {
+                            AccountManagementView()
+                        } label: {
+                            Label("管理账号", systemImage: "person.2")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                     }
                     .padding(.vertical, 8)
                 } else {
@@ -225,6 +233,14 @@ struct LibraryView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+
+                    NavigationLink {
+                        AccountManagementView()
+                    } label: {
+                        Label("账号管理", systemImage: "person.2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
                 .padding(.vertical, 8)
             }

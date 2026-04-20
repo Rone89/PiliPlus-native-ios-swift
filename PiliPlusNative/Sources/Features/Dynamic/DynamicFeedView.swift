@@ -137,7 +137,7 @@ struct DynamicFeedView: View {
     }
 }
 
-private struct DynamicCard: View {
+struct DynamicCard: View {
     let post: BiliDynamicPost
 
     var body: some View {
@@ -250,6 +250,17 @@ private struct DynamicCard: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            NavigationLink {
+                DynamicDetailView(dynamicID: post.id)
+            } label: {
+                Label("查看动态详情", systemImage: "arrow.right.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
         .padding(16)
         .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
