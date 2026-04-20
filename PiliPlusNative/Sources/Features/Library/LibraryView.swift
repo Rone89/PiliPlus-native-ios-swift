@@ -11,44 +11,8 @@ struct LibraryView: View {
     var body: some View {
         List {
             accountSection
-
-            if !libraryStore.history.isEmpty {
-                Section("继续观看") {
-                    ForEach(libraryStore.history) { record in
-                        NavigationLink {
-                            VideoDetailView(bvid: record.video.bvid, aid: record.video.aid)
-                        } label: {
-                            WatchHistoryRow(record: record)
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                libraryStore.removeHistory(bvid: record.video.bvid)
-                            } label: {
-                                Label("删除历史", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !libraryStore.favorites.isEmpty {
-                Section("本地收藏") {
-                    ForEach(libraryStore.favorites) { video in
-                        NavigationLink {
-                            VideoDetailView(bvid: video.bvid, aid: video.aid)
-                        } label: {
-                            FavoriteRow(video: video)
-                        }
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                libraryStore.removeFavorite(bvid: video.bvid)
-                            } label: {
-                                Label("移除收藏", systemImage: "star.slash")
-                            }
-                        }
-                    }
-                }
-            }
+            historySection
+            favoritesSection
 
             Section("更多") {
                 NavigationLink {
@@ -117,6 +81,54 @@ struct LibraryView: View {
         }
         .refreshable {
             await authStore.sync()
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        if !libraryStore.history.isEmpty {
+            Section("继续观看") {
+                ForEach(libraryStore.history) { record in
+                    NavigationLink {
+                        VideoDetailView(bvid: record.video.bvid, aid: record.video.aid)
+                    } label: {
+                        WatchHistoryRow(record: record)
+                    }
+                    .contextMenu {
+                        if let bvid = record.video.bvid {
+                            Button(role: .destructive) {
+                                libraryStore.removeHistory(bvid: bvid)
+                            } label: {
+                                Label("删除历史", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var favoritesSection: some View {
+        if !libraryStore.favorites.isEmpty {
+            Section("本地收藏") {
+                ForEach(libraryStore.favorites) { video in
+                    NavigationLink {
+                        VideoDetailView(bvid: video.bvid, aid: video.aid)
+                    } label: {
+                        FavoriteRow(video: video)
+                    }
+                    .contextMenu {
+                        if let bvid = video.bvid {
+                            Button(role: .destructive) {
+                                libraryStore.removeFavorite(bvid: bvid)
+                            } label: {
+                                Label("移除收藏", systemImage: "star.slash")
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

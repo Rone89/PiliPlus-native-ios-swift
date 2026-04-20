@@ -15,13 +15,13 @@ final class VideoDetailViewModel: ObservableObject {
     private var commentsNextOffset = ""
     private var commentsReachedEnd = false
 
-    var canLoadMoreComments: Bool {
-        !commentsReachedEnd && !comments.isEmpty
-    }
-
     init(bvid: String?, aid: Int?) {
         self.bvid = bvid
         self.aid = aid
+    }
+
+    var canLoadMoreComments: Bool {
+        !commentsReachedEnd && !comments.isEmpty
     }
 
     func loadIfNeeded() async {
@@ -47,6 +47,7 @@ final class VideoDetailViewModel: ObservableObject {
             } else {
                 throw APIError.invalidResponse("缺少视频标识")
             }
+
             self.detail = detail
             if let aid = detail.video.aid {
                 await loadComments(aid: aid, reset: true)
@@ -112,147 +113,156 @@ struct VideoDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if viewModel.isLoading && viewModel.detail == nil {
-                ProgressView("正在加载视频详情")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let errorMessage = viewModel.errorMessage, viewModel.detail == nil {
-                ContentUnavailableView("视频加载失败", systemImage: "play.slash", description: Text(errorMessage))
-            } else if let detail = viewModel.detail {
-                let resumeRecord = libraryStore.historyRecord(video: detail.video)
-                let resumeIndex = resumeRecord.flatMap { record in
-                    detail.pages.firstIndex(where: { $0.cid == record.pageCID })
-                } ?? 0
+        content
+            .navigationTitle("视频详情")
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                await viewModel.loadIfNeeded()
+            }
+    }
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        AsyncImage(url: detail.video.coverURL) { phase in
-                            switch phase {
-                            case let .success(image):
-                                image
-                                    .resizable()
-                                    .scaledToFill()
-                            case .failure:
-                                Rectangle().fill(.quaternary)
-                            case .empty:
-                                Rectangle().fill(.quaternary).overlay(ProgressView())
-                            @unknown default:
-                                Rectangle().fill(.quaternary)
+    @ViewBuilder
+    private var content: some View {
+        if viewModel.isLoading && viewModel.detail == nil {
+            ProgressView("正在加载视频详情")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let errorMessage = viewModel.errorMessage, viewModel.detail == nil {
+            ContentUnavailableView("视频加载失败", systemImage: "play.slash", description: Text(errorMessage))
+        } else if let detail = viewModel.detail {
+            loadedContent(detail: detail)
+        }
+    }
+
+    private func loadedContent(detail: BiliVideoDetail) -> some View {
+        let resumeRecord = libraryStore.historyRecord(video: detail.video)
+        let resumeIndex = resumeRecord.flatMap { record in
+            detail.pages.firstIndex(where: { $0.cid == record.pageCID })
+        } ?? 0
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                AsyncImage(url: detail.video.coverURL) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        Rectangle().fill(.quaternary)
+                    case .empty:
+                        Rectangle().fill(.quaternary).overlay(ProgressView())
+                    @unknown default:
+                        Rectangle().fill(.quaternary)
+                    }
+                }
+                .frame(height: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(detail.video.title)
+                        .font(.title2.bold())
+
+                    HStack(spacing: 12) {
+                        if let mid = detail.video.owner.mid {
+                            NavigationLink {
+                                UserProfileView(mid: mid)
+                            } label: {
+                                Label(detail.video.owner.name, systemImage: "person.crop.circle")
                             }
+                            .buttonStyle(.plain)
+                        } else {
+                            Label(detail.video.owner.name, systemImage: "person.crop.circle")
                         }
-                        .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        Label(detail.video.stats.plays, systemImage: "play.fill")
+                        if let likes = detail.video.stats.likes {
+                            Label(likes, systemImage: "hand.thumbsup.fill")
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(detail.video.title)
-                                .font(.title2.bold())
-
-                            HStack(spacing: 12) {
-                                if let mid = detail.video.owner.mid {
-                                    NavigationLink {
-                                        UserProfileView(mid: mid)
-                                    } label: {
-                                        Label(detail.video.owner.name, systemImage: "person.crop.circle")
-                                    }
-                                    .buttonStyle(.plain)
-                                } else {
-                                    Label(detail.video.owner.name, systemImage: "person.crop.circle")
-                                }
-                                Label(detail.video.stats.plays, systemImage: "play.fill")
-                                if let likes = detail.video.stats.likes {
-                                    Label(likes, systemImage: "hand.thumbsup.fill")
-                                }
-                            }
-                            .font(.subheadline)
+                    if let relativeDate = BiliFormat.relativeDate(detail.video.publishedAt) {
+                        Text(relativeDate)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
 
-                            if let relativeDate = BiliFormat.relativeDate(detail.video.publishedAt) {
-                                Text(relativeDate)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                    HStack(spacing: 10) {
+                        if let bvid = detail.video.bvid {
+                            Text(bvid)
+                        }
+                        if let aid = detail.video.aid {
+                            Text("av\(aid)")
+                        }
+                    }
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
 
-                            HStack(spacing: 10) {
-                                Text(detail.video.bvid)
-                                if let aid = detail.video.aid {
-                                    Text("av\(aid)")
-                                }
-                            }
-                            .font(.caption.monospaced())
+                    if !detail.video.descriptionText.isEmpty {
+                        Text(detail.video.descriptionText)
+                            .font(.body)
                             .foregroundStyle(.secondary)
-
-                            if !detail.video.descriptionText.isEmpty {
-                                Text(detail.video.descriptionText)
-                                    .font(.body)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        actionSection(detail: detail)
-
-                        if let resumeRecord {
-                            resumeSection(detail: detail, record: resumeRecord, resumeIndex: resumeIndex)
-                        }
-
-                        if !detail.pages.isEmpty {
-                            playbackSection(detail: detail)
-                        }
-
-                        commentsSection
-
-                        if !detail.related.isEmpty {
-                            VStack(alignment: .leading, spacing: 14) {
-                                Text("相关推荐")
-                                    .font(.headline)
-
-                                ForEach(detail.related) { video in
-                                    NavigationLink {
-                                        VideoDetailView(bvid: video.bvid)
-                                    } label: {
-                                        VideoCardView(video: video)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
                     }
-                    .padding()
                 }
-                .background(Color(uiColor: .systemGroupedBackground))
-                .toolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button {
-                            libraryStore.toggleFavorite(detail.video)
-                        } label: {
-                            Image(systemName: libraryStore.isFavorite(detail.video) ? "star.fill" : "star")
-                                .foregroundStyle(libraryStore.isFavorite(detail.video) ? .yellow : .primary)
-                        }
 
-                        if let pageURL = detail.video.pageURL {
-                            ShareLink(item: pageURL) {
-                                Image(systemName: "square.and.arrow.up")
+                actionSection(detail: detail)
+
+                if let resumeRecord {
+                    resumeSection(detail: detail, record: resumeRecord, resumeIndex: resumeIndex)
+                }
+
+                if !detail.pages.isEmpty {
+                    playbackSection(detail: detail)
+                }
+
+                commentsSection
+
+                if !detail.related.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("相关推荐")
+                            .font(.headline)
+
+                        ForEach(detail.related) { video in
+                            NavigationLink {
+                                VideoDetailView(bvid: video.bvid, aid: video.aid)
+                            } label: {
+                                VideoCardView(video: video)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
-                .task(id: detail.video.id) {
-                    libraryStore.refreshSnapshots(with: detail.video)
-                    if let record = libraryStore.historyRecord(video: detail.video),
-                       let index = detail.pages.firstIndex(where: { $0.cid == record.pageCID }) {
-                        selectedPageIndex = index
-                    }
+            }
+            .padding()
+        }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    libraryStore.toggleFavorite(detail.video)
+                } label: {
+                    Image(systemName: libraryStore.isFavorite(detail.video) ? "star.fill" : "star")
+                        .foregroundStyle(libraryStore.isFavorite(detail.video) ? .yellow : .primary)
                 }
-                .sheet(item: $selectedComment) { comment in
-                    if let aid = detail.video.aid {
-                        CommentRepliesView(aid: aid, rootComment: comment)
+
+                if let pageURL = detail.video.pageURL {
+                    ShareLink(item: pageURL) {
+                        Image(systemName: "square.and.arrow.up")
                     }
                 }
             }
         }
-        .navigationTitle("视频详情")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await viewModel.loadIfNeeded()
+        .task(id: detail.video.id) {
+            libraryStore.refreshSnapshots(with: detail.video)
+            if let record = libraryStore.historyRecord(video: detail.video),
+               let index = detail.pages.firstIndex(where: { $0.cid == record.pageCID }) {
+                selectedPageIndex = index
+            }
+        }
+        .sheet(item: $selectedComment) { comment in
+            if let aid = detail.video.aid {
+                CommentRepliesView(aid: aid, rootComment: comment)
+            }
         }
     }
 

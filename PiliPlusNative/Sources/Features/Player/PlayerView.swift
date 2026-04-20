@@ -62,6 +62,10 @@ final class PlayerViewModel: ObservableObject {
 
     func loadCurrentPage() async {
         guard let page = currentPage else { return }
+        guard let videoIdentifier = detail.video.bvid ?? detail.video.aid.map({ "av\($0)" }) else {
+            errorMessage = "缺少视频标识"
+            return
+        }
         isLoading = true
         errorMessage = nil
         danmakuError = nil
@@ -74,7 +78,7 @@ final class PlayerViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let playbackTask = BiliAPIClient.shared.fetchPlayback(bvid: detail.video.bvid, cid: page.cid)
+            async let playbackTask = BiliAPIClient.shared.fetchPlayback(bvid: videoIdentifier, cid: page.cid)
             async let danmakuTask = BiliAPIClient.shared.fetchDanmaku(cid: page.cid)
 
             let playback = try await playbackTask
@@ -147,9 +151,13 @@ final class PlayerViewModel: ObservableObject {
         defer { isSendingDanmaku = false }
 
         do {
+            guard let bvid = detail.video.bvid else {
+                danmakuError = "当前视频缺少 BV 号，暂不支持发送弹幕"
+                return
+            }
             try await BiliAPIClient.shared.sendDanmaku(
                 session: session,
-                bvid: detail.video.bvid,
+                bvid: bvid,
                 cid: page.cid,
                 text: text,
                 progressMS: Int(max(currentSeconds, 0) * 1000)
@@ -161,16 +169,18 @@ final class PlayerViewModel: ObservableObject {
     }
 
     private func resumeProgress(for page: BiliVideoPage) -> Double? {
+        guard let bvid = detail.video.bvid else { return nil }
         if selectedPageIndex == initialPageIndex, let initialStartAtSeconds, initialStartAtSeconds > 0 {
             return initialStartAtSeconds
         }
-        return libraryStore?.resumeProgress(for: detail.video.bvid, cid: page.cid)
+        return libraryStore?.resumeProgress(for: bvid, cid: page.cid)
     }
 
     private func configurePlayer(with url: URL, startAtSeconds: Double?) {
+        let refererTarget = detail.video.pageURL?.absoluteString ?? "https://www.bilibili.com"
         let options: [String: Any] = [
             "AVURLAssetHTTPHeaderFieldsKey": [
-                "Referer": "https://www.bilibili.com/video/\(detail.video.bvid)",
+                "Referer": refererTarget,
                 "Origin": "https://www.bilibili.com",
                 "User-Agent": BiliAPIClient.webUserAgent
             ]
