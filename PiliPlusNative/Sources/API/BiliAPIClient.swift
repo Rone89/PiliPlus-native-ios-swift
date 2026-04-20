@@ -17,28 +17,52 @@ actor BiliAPIClient {
     private let appSecret = "b5475a8825547a4fc26c7d518eaaa02e"
     private let appTraceID = "11111111111111111111111111111111:1111111111111111:0:0"
     private let dynamicFeatures = "itemOpusStyle,listOnlyfans,onlyfansQaCard"
+    private let anonymousSession: URLSession
+    private let authenticatedSession: URLSession
 
     private var cachedMixinKey: String?
     private var cachedMixinDay: Int?
 
-    func fetchRecommended(page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
-        let index = max(page - 1, 0)
-        let payload = try await request(
-            path: "/x/web-interface/wbi/index/top/feed/rcmd",
-            query: try await signedQuery([
-                "version": "1",
-                "feed_version": "V8",
-                "homepage_ver": "1",
-                "ps": "\(pageSize)",
-                "fresh_idx": "\(index)",
-                "brush": "\(index)",
-                "fresh_type": "4"
-            ])
-        )
+    init() {
+        let anonymousConfiguration = URLSessionConfiguration.ephemeral
+        anonymousConfiguration.httpCookieStorage = nil
+        anonymousConfiguration.httpShouldSetCookies = false
+        anonymousConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        anonymousConfiguration.urlCache = nil
 
-        return payload.data.array("item").compactMap { item in
-            guard item.string("goto") == "av" else { return nil }
-            return BiliVideo(json: item)
+        let authenticatedConfiguration = URLSessionConfiguration.ephemeral
+        authenticatedConfiguration.httpCookieStorage = nil
+        authenticatedConfiguration.httpShouldSetCookies = false
+        authenticatedConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        authenticatedConfiguration.urlCache = nil
+
+        self.anonymousSession = URLSession(configuration: anonymousConfiguration)
+        self.authenticatedSession = URLSession(configuration: authenticatedConfiguration)
+    }
+
+    func fetchRecommended(page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
+        do {
+            let index = max(page - 1, 0)
+            let payload = try await request(
+                path: "/x/web-interface/wbi/index/top/feed/rcmd",
+                query: try await signedQuery([
+                    "version": "1",
+                    "feed_version": "V8",
+                    "homepage_ver": "1",
+                    "ps": "\(pageSize)",
+                    "fresh_idx": "\(index)",
+                    "brush": "\(index)",
+                    "fresh_type": "4"
+                ])
+            )
+
+            return payload.data.array("item").compactMap { item in
+                guard item.string("goto") == "av" else { return nil }
+                return BiliVideo(json: item)
+            }
+        } catch {
+            // Fallback: at least keep the home feed usable for anonymous users.
+            return try await fetchPopular(page: page, pageSize: pageSize)
         }
     }
 
@@ -1000,7 +1024,8 @@ actor BiliAPIClient {
             query: query,
             body: body,
             contentType: contentType,
-            headers: headers
+            headers: headers,
+            session: headers["Cookie"] == nil ? anonymousSession : authenticatedSession
         )
     }
 
@@ -1011,7 +1036,8 @@ actor BiliAPIClient {
         query: [String: String],
         body: [String: Any]? = nil,
         contentType: RequestContentType = .json,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        session: URLSession? = nil
     ) async throws -> APIEnvelope {
         let envelope = try await rawRequest(
             baseURL: baseURL,
@@ -1020,7 +1046,8 @@ actor BiliAPIClient {
             query: query,
             body: body,
             contentType: contentType,
-            headers: headers
+            headers: headers,
+            session: session ?? (headers["Cookie"] == nil ? anonymousSession : authenticatedSession)
         )
 
         guard envelope.code == 0 else {
@@ -1036,7 +1063,8 @@ actor BiliAPIClient {
         query: [String: String],
         body: [String: Any]? = nil,
         contentType: RequestContentType = .json,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        session: URLSession
     ) async throws -> APIEnvelope {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         components?.path = path
@@ -1066,7 +1094,7 @@ actor BiliAPIClient {
             }
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
             throw APIError.http("接口请求失败")
@@ -1083,11 +1111,12 @@ actor BiliAPIClient {
     private func rawDataRequest(url: URL, headers: [String: String]) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = 20
+        request.httpShouldHandleCookies = false
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await anonymousSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
             throw APIError.http("原始数据请求失败")
         }
