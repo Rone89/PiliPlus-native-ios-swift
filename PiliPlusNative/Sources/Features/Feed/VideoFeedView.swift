@@ -117,9 +117,6 @@ struct VideoFeedView: View {
                     }
                     .padding(.vertical)
                 }
-                .refreshable {
-                    await viewModel.refresh(session: authStore.session, preferPersonalized: preferPersonalized)
-                }
             }
         }
         .background(Color(uiColor: .systemGroupedBackground))

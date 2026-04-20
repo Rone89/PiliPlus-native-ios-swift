@@ -28,7 +28,7 @@ final class DynamicFeedViewModel: ObservableObject {
 
         do {
             let result = try await BiliAPIClient.shared.fetchDynamicFeed(session: session)
-            posts = result.0
+            posts = await enrichPosts(result.0)
             nextOffset = result.1
             hasMore = result.2
         } catch {
@@ -43,12 +43,30 @@ final class DynamicFeedViewModel: ObservableObject {
 
         do {
             let result = try await BiliAPIClient.shared.fetchDynamicFeed(session: session, offset: nextOffset)
-            posts.append(contentsOf: result.0)
+            posts.append(contentsOf: await enrichPosts(result.0))
             nextOffset = result.1
             hasMore = result.2
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func enrichPosts(_ items: [BiliDynamicPost]) async -> [BiliDynamicPost] {
+        var enriched: [BiliDynamicPost] = []
+        enriched.reserveCapacity(items.count)
+
+        for post in items {
+            if post.imageURLs.isEmpty,
+               post.kindLabel.contains("图"),
+               let images = try? await BiliAPIClient.shared.fetchDynamicImages(id: post.id),
+               !images.isEmpty {
+                enriched.append(post.withImageURLs(images))
+            } else {
+                enriched.append(post)
+            }
+        }
+
+        return enriched
     }
 }
 

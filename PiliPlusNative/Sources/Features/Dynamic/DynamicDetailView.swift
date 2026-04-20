@@ -61,7 +61,10 @@ final class DynamicDetailViewModel: ObservableObject {
     }
 
     private func loadComments(reset: Bool) async {
-        guard let post, let oid = post.commentID, let type = post.commentType else { return }
+        guard let post else { return }
+        let oid = post.commentID ?? Int(post.id)
+        let type = post.commentType ?? 17
+        guard let oid else { return }
         if reset {
             isLoadingComments = true
             commentsError = nil

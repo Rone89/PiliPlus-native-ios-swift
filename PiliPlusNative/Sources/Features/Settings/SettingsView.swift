@@ -12,8 +12,8 @@ struct SettingsView: View {
     @State private var recommendWithAccount = AppPreferences.recommendWithAccount
 
     private var versionText: String {
-        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.11"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "21"
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.12"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "22"
         return "\(shortVersion) (\(build))"
     }
 

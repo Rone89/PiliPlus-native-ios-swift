@@ -1,4 +1,21 @@
+import AVKit
 import SwiftUI
+
+private enum VideoDetailSection: String, CaseIterable, Identifiable {
+    case info
+    case comments
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .info:
+            return "视频资料"
+        case .comments:
+            return "视频评论"
+        }
+    }
+}
 
 @MainActor
 final class VideoDetailViewModel: ObservableObject {
@@ -93,13 +110,139 @@ final class VideoDetailViewModel: ObservableObject {
     }
 }
 
+@MainActor
+final class InlinePlayerViewModel: ObservableObject {
+    @Published private(set) var isLoading = false
+    @Published private(set) var currentSeconds = 0.0
+    @Published private(set) var playback: BiliPlayback?
+    @Published var errorMessage: String?
+    @Published var selectedPageIndex: Int
+    @Published var playbackRate = AppPreferences.playbackRate
+
+    let detail: BiliVideoDetail
+    let player = AVPlayer()
+
+    private weak var libraryStore: LibraryStore?
+    private var timeObserver: Any?
+    private var initialPageIndex: Int
+
+    init(detail: BiliVideoDetail, initialPageIndex: Int) {
+        self.detail = detail
+        self.initialPageIndex = min(max(initialPageIndex, 0), max(detail.pages.count - 1, 0))
+        self.selectedPageIndex = min(max(initialPageIndex, 0), max(detail.pages.count - 1, 0))
+    }
+
+    var currentPage: BiliVideoPage? {
+        detail.pages[safe: selectedPageIndex]
+    }
+
+    var canGoToPreviousPage: Bool { selectedPageIndex > 0 }
+    var canGoToNextPage: Bool { selectedPageIndex < detail.pages.count - 1 }
+
+    func attachLibrary(_ store: LibraryStore) {
+        libraryStore = store
+        if timeObserver == nil {
+            timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+                guard let self else { return }
+                let seconds = time.seconds
+                guard seconds.isFinite, seconds >= 0 else { return }
+                self.currentSeconds = seconds
+            }
+        }
+    }
+
+    func loadIfNeeded() async {
+        guard playback == nil else { return }
+        await loadCurrentPage()
+    }
+
+    func loadCurrentPage() async {
+        guard let page = currentPage else { return }
+        guard let videoIdentifier = detail.video.bvid ?? detail.video.aid.map({ "av\($0)" }) else {
+            errorMessage = "缺少视频标识"
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            let playback = try await BiliAPIClient.shared.fetchPlayback(bvid: videoIdentifier, cid: page.cid)
+            self.playback = playback
+            configurePlayer(with: playback.streamURL)
+            libraryStore?.updateWatchRecord(video: detail.video, page: page, progressSeconds: currentSeconds)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func selectPage(at index: Int) async {
+        guard selectedPageIndex != index else { return }
+        selectedPageIndex = index
+        await loadCurrentPage()
+    }
+
+    func goToPreviousPage() async {
+        guard canGoToPreviousPage else { return }
+        await selectPage(at: selectedPageIndex - 1)
+    }
+
+    func goToNextPage() async {
+        guard canGoToNextPage else { return }
+        await selectPage(at: selectedPageIndex + 1)
+    }
+
+    func play() {
+        player.playImmediately(atRate: Float(playbackRate))
+    }
+
+    func pause() {
+        player.pause()
+    }
+
+    func setPlaybackRate(_ rate: Double) {
+        playbackRate = rate
+        AppPreferences.playbackRate = rate
+        if player.timeControlStatus != .paused {
+            play()
+        }
+    }
+
+    func tearDown() {
+        if let timeObserver {
+            player.removeTimeObserver(timeObserver)
+            self.timeObserver = nil
+        }
+        player.pause()
+    }
+
+    private func configurePlayer(with url: URL) {
+        let refererTarget = detail.video.pageURL?.absoluteString ?? "https://www.bilibili.com"
+        let options: [String: Any] = [
+            "AVURLAssetHTTPHeaderFieldsKey": [
+                "Referer": refererTarget,
+                "Origin": "https://www.bilibili.com",
+                "User-Agent": BiliAPIClient.webUserAgent
+            ]
+        ]
+        let asset = AVURLAsset(url: url, options: options)
+        let item = AVPlayerItem(asset: asset)
+        player.replaceCurrentItem(with: item)
+        currentSeconds = 0
+        play()
+    }
+}
+
 struct VideoDetailView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var viewModel: VideoDetailViewModel
+    @State private var playerModel: InlinePlayerViewModel?
     @State private var selectedPageIndex = 0
     @State private var selectedComment: BiliComment?
+    @State private var selectedSection: VideoDetailSection = .info
 
     init(bvid: String?, aid: Int?) {
         _viewModel = StateObject(wrappedValue: VideoDetailViewModel(bvid: bvid, aid: aid))
@@ -142,30 +285,33 @@ struct VideoDetailView: View {
             detail.pages.firstIndex(where: { $0.cid == record.pageCID })
         } ?? 0
 
-        return GeometryReader { proxy in
-            let contentWidth = min(max(proxy.size.width - 32, 0), 420)
-            let isWide = horizontalSizeClass == .regular && proxy.size.width >= 1000 && proxy.size.height >= 700
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if let playerModel {
+                    inlinePlayerSection(model: playerModel)
+                } else {
+                    ProgressView("正在准备播放器")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                }
 
-            ScrollView {
-                Group {
-                    if isWide {
-                        HStack(alignment: .top, spacing: 20) {
-                            leftColumn(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
-                                .frame(maxWidth: min(max(proxy.size.width * 0.42, 360), 520), alignment: .topLeading)
-                            rightColumn(detail: detail)
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 20) {
-                            leftColumn(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
-                            rightColumn(detail: detail)
-                        }
-                        .frame(maxWidth: contentWidth, alignment: .topLeading)
+                Picker("详情分区", selection: $selectedSection) {
+                    ForEach(VideoDetailSection.allCases) { section in
+                        Text(section.title).tag(section)
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .center)
+                .pickerStyle(.segmented)
+
+                if selectedSection == .info {
+                    infoSection(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
+                } else {
+                    commentsSection
+                }
             }
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .toolbar {
@@ -189,6 +335,21 @@ struct VideoDetailView: View {
             if let record = libraryStore.historyRecord(video: detail.video),
                let index = detail.pages.firstIndex(where: { $0.cid == record.pageCID }) {
                 selectedPageIndex = index
+            } else {
+                selectedPageIndex = resumeIndex
+            }
+
+            let model = InlinePlayerViewModel(detail: detail, initialPageIndex: selectedPageIndex)
+            model.attachLibrary(libraryStore)
+            playerModel = model
+            await model.loadIfNeeded()
+        }
+        .onDisappear {
+            playerModel?.tearDown()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                playerModel?.pause()
             }
         }
         .sheet(item: $selectedComment) { comment in
@@ -198,10 +359,102 @@ struct VideoDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func leftColumn(detail: BiliVideoDetail, resumeRecord: WatchRecord?, resumeIndex: Int) -> some View {
+    private func inlinePlayerSection(model: InlinePlayerViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VideoPlayer(player: model.player)
+                .frame(height: 236)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+            if model.isLoading {
+                ProgressView("正在获取播放地址")
+            } else if let errorMessage = model.errorMessage {
+                ContentUnavailableView("播放失败", systemImage: "play.slash.fill", description: Text(errorMessage))
+            }
+
+            if let page = model.currentPage {
+                Text(page.label)
+                    .font(.headline)
+                    .foregroundStyle(AppTheme.accent)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    Task { await model.goToPreviousPage() }
+                } label: {
+                    Label("上一 P", systemImage: "backward.end.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canGoToPreviousPage)
+
+                Button {
+                    model.play()
+                } label: {
+                    Label("播放", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    model.pause()
+                } label: {
+                    Label("暂停", systemImage: "pause.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    Task { await model.goToNextPage() }
+                } label: {
+                    Label("下一 P", systemImage: "forward.end.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canGoToNextPage)
+            }
+
+            if !model.detail.pages.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(model.detail.pages.enumerated()), id: \.offset) { index, page in
+                            Button {
+                                Task { await model.selectPage(at: index) }
+                            } label: {
+                                Text(page.label)
+                                    .font(.subheadline.weight(.medium))
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(index == model.selectedPageIndex ? AppTheme.accent : AppTheme.card, in: Capsule())
+                                    .foregroundStyle(index == model.selectedPageIndex ? .white : .primary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+
+            Picker("默认倍速", selection: playerRateBinding(model)) {
+                Text("0.75x").tag(0.75)
+                Text("1.0x").tag(1.0)
+                Text("1.25x").tag(1.25)
+                Text("1.5x").tag(1.5)
+                Text("2.0x").tag(2.0)
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(16)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func playerRateBinding(_ model: InlinePlayerViewModel) -> Binding<Double> {
+        Binding(
+            get: { model.playbackRate },
+            set: { model.setPlaybackRate($0) }
+        )
+    }
+
+    private func infoSection(detail: BiliVideoDetail, resumeRecord: WatchRecord?, resumeIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            coverSection(detail: detail)
             metadataSection(detail: detail)
             actionSection(detail: detail)
 
@@ -209,58 +462,8 @@ struct VideoDetailView: View {
                 resumeSection(detail: detail, record: resumeRecord, resumeIndex: resumeIndex)
             }
 
-            if !detail.pages.isEmpty {
-                playbackSection(detail: detail)
-            }
+            relatedSection(detail: detail)
         }
-    }
-
-    @ViewBuilder
-    private func rightColumn(detail: BiliVideoDetail) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            commentsSection
-
-            if !detail.related.isEmpty {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("相关推荐")
-                        .font(.headline)
-
-                    ForEach(detail.related) { video in
-                        HStack {
-                            Spacer(minLength: 0)
-                            NavigationLink {
-                                VideoDetailView(bvid: video.bvid, aid: video.aid)
-                            } label: {
-                                VideoCardView(video: video)
-                                    .frame(maxWidth: 420)
-                            }
-                            .buttonStyle(.plain)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func coverSection(detail: BiliVideoDetail) -> some View {
-        AsyncImage(url: detail.video.coverURL) { phase in
-            switch phase {
-            case let .success(image):
-                image
-                    .resizable()
-                    .scaledToFill()
-            case .failure:
-                Rectangle().fill(.quaternary)
-            case .empty:
-                Rectangle().fill(.quaternary).overlay(ProgressView())
-            @unknown default:
-                Rectangle().fill(.quaternary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(16 / 9, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
 
     private func metadataSection(detail: BiliVideoDetail) -> some View {
@@ -289,12 +492,12 @@ struct VideoDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    identifierView(detail: detail)
+            HStack(spacing: 10) {
+                if let bvid = detail.video.bvid {
+                    Text(bvid)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    identifierView(detail: detail)
+                if let aid = detail.video.aid {
+                    Text("av\(aid)")
                 }
             }
             .font(.caption.monospaced())
@@ -333,17 +536,6 @@ struct VideoDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func identifierView(detail: BiliVideoDetail) -> some View {
-        if let bvid = detail.video.bvid {
-            Text(bvid)
-        }
-        if let aid = detail.video.aid {
-            Text("av\(aid)")
-        }
-    }
-
-    @ViewBuilder
     private func actionSection(detail: BiliVideoDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("快捷操作")
@@ -381,6 +573,27 @@ struct VideoDetailView: View {
         .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
+    private func relatedSection(detail: BiliVideoDetail) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("更多视频推荐")
+                .font(.headline)
+
+            ForEach(detail.related) { video in
+                HStack {
+                    Spacer(minLength: 0)
+                    NavigationLink {
+                        VideoDetailView(bvid: video.bvid, aid: video.aid)
+                    } label: {
+                        VideoCardView(video: video)
+                            .frame(maxWidth: 420)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
     @ViewBuilder
     private func resumeSection(detail: BiliVideoDetail, record: WatchRecord, resumeIndex: Int) -> some View {
         NavigationLink {
@@ -404,47 +617,12 @@ struct VideoDetailView: View {
                 Text(BiliFormat.progressText(record.progressSeconds, total: record.pageDuration))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
-                if let updated = BiliFormat.absoluteDate(record.updatedAt) {
-                    Text(updated)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func playbackSection(detail: BiliVideoDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("播放")
-                .font(.headline)
-
-            Picker("当前分 P", selection: $selectedPageIndex) {
-                ForEach(Array(detail.pages.enumerated()), id: \.offset) { index, page in
-                    Text(page.label).tag(index)
-                }
-            }
-            .pickerStyle(.menu)
-
-            NavigationLink {
-                PlayerView(detail: detail, initialPageIndex: selectedPageIndex)
-            } label: {
-                Label("播放当前分 P", systemImage: "play.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(AppTheme.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .foregroundStyle(.white)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(16)
-        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     @ViewBuilder
