@@ -10,6 +10,7 @@ final class VideoFeedViewModel: ObservableObject {
     let kind: FeedKind
 
     private var page = 1
+    private var recommendationCursor = 0
     private var hasMore = true
 
     init(kind: FeedKind) {
@@ -23,15 +24,17 @@ final class VideoFeedViewModel: ObservableObject {
 
     func refresh() async {
         page = 1
+        if kind == .recommend {
+            recommendationCursor += 1
+        }
         hasMore = true
         errorMessage = nil
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let items = try await fetch(page: page)
+            let items = try await fetchNextBatch(reset: true)
             videos = items
-            page += 1
             hasMore = !items.isEmpty
         } catch {
             errorMessage = error.localizedDescription
@@ -44,21 +47,26 @@ final class VideoFeedViewModel: ObservableObject {
         defer { isLoadingMore = false }
 
         do {
-            let items = try await fetch(page: page)
+            let items = try await fetchNextBatch(reset: false)
             videos.append(contentsOf: items)
-            page += 1
             hasMore = !items.isEmpty
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func fetch(page: Int) async throws -> [BiliVideo] {
+    private func fetchNextBatch(reset: Bool) async throws -> [BiliVideo] {
         switch kind {
         case .recommend:
-            return try await BiliAPIClient.shared.fetchRecommended(page: page)
+            let currentCursor = reset ? recommendationCursor : recommendationCursor + 1
+            let items = try await BiliAPIClient.shared.fetchRecommended(freshIndex: currentCursor)
+            recommendationCursor = currentCursor
+            return items
         case .popular:
-            return try await BiliAPIClient.shared.fetchPopular(page: page)
+            let currentPage = reset ? 1 : page
+            let items = try await BiliAPIClient.shared.fetchPopular(page: currentPage)
+            page = currentPage + 1
+            return items
         }
     }
 }

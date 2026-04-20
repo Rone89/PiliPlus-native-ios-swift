@@ -141,101 +141,28 @@ struct VideoDetailView: View {
             detail.pages.firstIndex(where: { $0.cid == record.pageCID })
         } ?? 0
 
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                AsyncImage(url: detail.video.coverURL) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        Rectangle().fill(.quaternary)
-                    case .empty:
-                        Rectangle().fill(.quaternary).overlay(ProgressView())
-                    @unknown default:
-                        Rectangle().fill(.quaternary)
-                    }
-                }
-                .frame(height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        return GeometryReader { proxy in
+            let isWide = proxy.size.width >= 900
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(detail.video.title)
-                        .font(.title2.bold())
-
-                    HStack(spacing: 12) {
-                        if let mid = detail.video.owner.mid {
-                            NavigationLink {
-                                UserProfileView(mid: mid)
-                            } label: {
-                                Label(detail.video.owner.name, systemImage: "person.crop.circle")
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            Label(detail.video.owner.name, systemImage: "person.crop.circle")
+            ScrollView {
+                Group {
+                    if isWide {
+                        HStack(alignment: .top, spacing: 20) {
+                            leftColumn(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
+                                .frame(maxWidth: min(max(proxy.size.width * 0.42, 360), 520), alignment: .topLeading)
+                            rightColumn(detail: detail)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
-                        Label(detail.video.stats.plays, systemImage: "play.fill")
-                        if let likes = detail.video.stats.likes {
-                            Label(likes, systemImage: "hand.thumbsup.fill")
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                    if let relativeDate = BiliFormat.relativeDate(detail.video.publishedAt) {
-                        Text(relativeDate)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    HStack(spacing: 10) {
-                        if let bvid = detail.video.bvid {
-                            Text(bvid)
-                        }
-                        if let aid = detail.video.aid {
-                            Text("av\(aid)")
-                        }
-                    }
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-
-                    if !detail.video.descriptionText.isEmpty {
-                        Text(detail.video.descriptionText)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                actionSection(detail: detail)
-
-                if let resumeRecord {
-                    resumeSection(detail: detail, record: resumeRecord, resumeIndex: resumeIndex)
-                }
-
-                if !detail.pages.isEmpty {
-                    playbackSection(detail: detail)
-                }
-
-                commentsSection
-
-                if !detail.related.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("相关推荐")
-                            .font(.headline)
-
-                        ForEach(detail.related) { video in
-                            NavigationLink {
-                                VideoDetailView(bvid: video.bvid, aid: video.aid)
-                            } label: {
-                                VideoCardView(video: video)
-                            }
-                            .buttonStyle(.plain)
+                    } else {
+                        VStack(alignment: .leading, spacing: 20) {
+                            leftColumn(detail: detail, resumeRecord: resumeRecord, resumeIndex: resumeIndex)
+                            rightColumn(detail: detail)
                         }
                     }
                 }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .padding()
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .toolbar {
@@ -269,12 +196,151 @@ struct VideoDetailView: View {
     }
 
     @ViewBuilder
+    private func leftColumn(detail: BiliVideoDetail, resumeRecord: WatchRecord?, resumeIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            coverSection(detail: detail)
+            metadataSection(detail: detail)
+            actionSection(detail: detail)
+
+            if let resumeRecord {
+                resumeSection(detail: detail, record: resumeRecord, resumeIndex: resumeIndex)
+            }
+
+            if !detail.pages.isEmpty {
+                playbackSection(detail: detail)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rightColumn(detail: BiliVideoDetail) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            commentsSection
+
+            if !detail.related.isEmpty {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("相关推荐")
+                        .font(.headline)
+
+                    ForEach(detail.related) { video in
+                        NavigationLink {
+                            VideoDetailView(bvid: video.bvid, aid: video.aid)
+                        } label: {
+                            VideoCardView(video: video)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func coverSection(detail: BiliVideoDetail) -> some View {
+        AsyncImage(url: detail.video.coverURL) { phase in
+            switch phase {
+            case let .success(image):
+                image
+                    .resizable()
+                    .scaledToFill()
+            case .failure:
+                Rectangle().fill(.quaternary)
+            case .empty:
+                Rectangle().fill(.quaternary).overlay(ProgressView())
+            @unknown default:
+                Rectangle().fill(.quaternary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    }
+
+    private func metadataSection(detail: BiliVideoDetail) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(detail.video.title)
+                .font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    ownerView(detail: detail)
+                    statsView(detail: detail)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    ownerView(detail: detail)
+                    statsView(detail: detail)
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+            if let relativeDate = BiliFormat.relativeDate(detail.video.publishedAt) {
+                Text(relativeDate)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    identifierView(detail: detail)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    identifierView(detail: detail)
+                }
+            }
+            .font(.caption.monospaced())
+            .foregroundStyle(.secondary)
+
+            if !detail.video.descriptionText.isEmpty {
+                Text(detail.video.descriptionText)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ownerView(detail: BiliVideoDetail) -> some View {
+        if let mid = detail.video.owner.mid {
+            NavigationLink {
+                UserProfileView(mid: mid)
+            } label: {
+                Label(detail.video.owner.name, systemImage: "person.crop.circle")
+            }
+            .buttonStyle(.plain)
+        } else {
+            Label(detail.video.owner.name, systemImage: "person.crop.circle")
+        }
+    }
+
+    @ViewBuilder
+    private func statsView(detail: BiliVideoDetail) -> some View {
+        Group {
+            Label(detail.video.stats.plays, systemImage: "play.fill")
+            if let likes = detail.video.stats.likes {
+                Label(likes, systemImage: "hand.thumbsup.fill")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func identifierView(detail: BiliVideoDetail) -> some View {
+        if let bvid = detail.video.bvid {
+            Text(bvid)
+        }
+        if let aid = detail.video.aid {
+            Text("av\(aid)")
+        }
+    }
+
+    @ViewBuilder
     private func actionSection(detail: BiliVideoDetail) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("快捷操作")
                 .font(.headline)
 
-            HStack(spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
                 Button {
                     libraryStore.toggleFavorite(detail.video)
                 } label: {

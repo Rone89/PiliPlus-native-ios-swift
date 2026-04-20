@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 
 actor BiliAPIClient {
     static let shared = BiliAPIClient()
@@ -41,8 +42,41 @@ actor BiliAPIClient {
         self.authenticatedSession = URLSession(configuration: authenticatedConfiguration)
     }
 
-    func fetchRecommended(page: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
-        let index = max(page - 1, 0)
+    func fetchRecommended(freshIndex: Int, pageSize: Int = 20) async throws -> [BiliVideo] {
+        let payload = try await request(
+            path: "/x/web-interface/wbi/index/top/feed/rcmd",
+            query: try await signedQuery([
+                "version": "1",
+                "feed_version": "V8",
+                "homepage_ver": "1",
+                "ps": "\(pageSize)",
+                "fresh_idx": "\(max(freshIndex, 0))",
+                "brush": "\(max(freshIndex, 0))",
+                "fresh_type": "4"
+            ]),
+            headers: [
+                "Referer": "https://www.bilibili.com",
+                "Origin": "https://www.bilibili.com",
+                "Cookie": anonymousCookieHeader
+            ]
+        )
+
+        let items = payload.data.array("item")
+        let videos = items.compactMap { item -> BiliVideo? in
+            guard item.string("goto") == "av",
+                  item["ad_info"] == nil else {
+                return nil
+            }
+            return BiliVideo(json: item)
+        }
+
+        if videos.isEmpty {
+            return try await fetchRecommendedApp(index: freshIndex, pageSize: pageSize)
+        }
+        return videos
+    }
+
+    private func fetchRecommendedApp(index: Int, pageSize: Int) async throws -> [BiliVideo] {
         let params = appSignedParameters([
             "build": "2001100",
             "c_locale": "zh_CN",
@@ -59,7 +93,7 @@ actor BiliAPIClient {
             "fourk": "1",
             "guidance": "0",
             "https_url_req": "0",
-            "idx": "\(index)",
+            "idx": "\(max(index, 0))",
             "mobi_app": "android_hd",
             "network": "wifi",
             "platform": "android",
@@ -92,7 +126,7 @@ actor BiliAPIClient {
         }
 
         if videos.isEmpty {
-            return try await fetchPopular(page: page, pageSize: pageSize)
+            return try await fetchPopular(page: max(index + 1, 1), pageSize: pageSize)
         }
         return videos
     }
@@ -233,6 +267,106 @@ actor BiliAPIClient {
         default:
             return QRCodeLoginResult(status: .failed, message: payload.message.isEmpty ? "登录失败" : payload.message, session: nil)
         }
+    }
+
+    func sendSMSCode(countryCode: String, phone: String) async throws -> SMSCodeLoginInfo {
+        let cid = sanitizedCountryCode(countryCode)
+        let tel = sanitizedPhone(phone)
+        guard !tel.isEmpty else {
+            throw APIError.invalidResponse("请输入手机号")
+        }
+
+        let timestampMS = Int(Date().timeIntervalSince1970 * 1000)
+        let params = appSignedParameters([
+            "build": "2001100",
+            "buvid": AppPreferences.anonymousBuvid3,
+            "c_locale": "zh_CN",
+            "channel": "master",
+            "cid": cid,
+            "disable_rcmd": "0",
+            "local_id": AppPreferences.anonymousBuvid3,
+            "login_session_id": Self.md5("\(AppPreferences.anonymousBuvid3)\(timestampMS)"),
+            "mobi_app": "android_hd",
+            "platform": "android",
+            "s_locale": "zh_CN",
+            "statistics": #"{"appId":5,"platform":3,"version":"2.0.1","abtest":""}"#,
+            "tel": tel,
+            "ts": "\(timestampMS / 1000)"
+        ])
+
+        let payload = try await request(
+            baseURL: passBaseURL,
+            path: "/x/passport-login/sms/send",
+            method: "POST",
+            query: [:],
+            body: params,
+            contentType: .form,
+            headers: loginHeaders
+        )
+
+        if let recaptchaURL = payload.data.string("recaptcha_url"), !recaptchaURL.isEmpty {
+            throw APIError.server("当前手机号需要额外风控验证，暂不支持：\(recaptchaURL)")
+        }
+
+        guard let captchaKey = payload.data.string("captcha_key"), !captchaKey.isEmpty else {
+            throw APIError.invalidResponse("验证码请求成功，但缺少 captcha_key")
+        }
+
+        return SMSCodeLoginInfo(captchaKey: captchaKey, telephone: tel, countryCode: cid)
+    }
+
+    func loginBySMS(countryCode: String, phone: String, code: String, captchaKey: String) async throws -> BiliSession {
+        let cid = sanitizedCountryCode(countryCode)
+        let tel = sanitizedPhone(phone)
+        let smsCode = code.trimmed
+        guard !tel.isEmpty, !smsCode.isEmpty else {
+            throw APIError.invalidResponse("请输入手机号和验证码")
+        }
+
+        let publicKey = try await fetchLoginPublicKey()
+        let encryptedRandom = try encryptRandomToken(usingPEM: publicKey)
+        let params = appSignedParameters([
+            "bili_local_id": AppPreferences.loginDeviceID,
+            "build": "2001100",
+            "buvid": AppPreferences.anonymousBuvid3,
+            "c_locale": "zh_CN",
+            "captcha_key": captchaKey,
+            "channel": "master",
+            "cid": cid,
+            "code": smsCode,
+            "device": "phone",
+            "device_id": AppPreferences.loginDeviceID,
+            "device_name": "iPhone",
+            "device_platform": "iOS18iPhone",
+            "disable_rcmd": "0",
+            "dt": encryptedRandom,
+            "from_pv": "main.my-information.my-login.0.click",
+            "from_url": "bilibili://user_center/mine",
+            "local_id": AppPreferences.anonymousBuvid3,
+            "mobi_app": "android_hd",
+            "platform": "android",
+            "s_locale": "zh_CN",
+            "statistics": #"{"appId":5,"platform":3,"version":"2.0.1","abtest":""}"#,
+            "tel": tel
+        ])
+
+        let payload = try await request(
+            baseURL: passBaseURL,
+            path: "/x/passport-login/login/sms",
+            method: "POST",
+            query: [:],
+            body: params,
+            contentType: .form,
+            headers: loginHeaders
+        )
+
+        let tokenInfo = payload.data.raw
+        let cookieInfo = payload.data.dictionary("cookie_info")?.array("cookies") ?? []
+        let session = BiliSession.from(tokenInfo: tokenInfo, cookieInfo: cookieInfo)
+        guard session.isLoggedIn else {
+            throw APIError.invalidResponse("短信登录返回成功，但没有拿到有效登录 cookie")
+        }
+        return session
     }
 
     func logout(session: BiliSession) async throws {
@@ -1018,7 +1152,21 @@ actor BiliAPIClient {
 
     private var tvHeaders: [String: String] {
         [
-            "buvid": "XY\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))",
+            "buvid": AppPreferences.anonymousBuvid3,
+            "env": "prod",
+            "app-key": "android_hd",
+            "User-Agent": Self.appUserAgent,
+            "x-bili-trace-id": appTraceID,
+            "x-bili-aurora-eid": "",
+            "x-bili-aurora-zone": "",
+            "bili-http-engine": "cronet",
+            "content-type": "application/x-www-form-urlencoded; charset=utf-8"
+        ]
+    }
+
+    private var loginHeaders: [String: String] {
+        [
+            "buvid": AppPreferences.anonymousBuvid3,
             "env": "prod",
             "app-key": "android_hd",
             "User-Agent": Self.appUserAgent,
@@ -1196,6 +1344,66 @@ actor BiliAPIClient {
         return result
     }
 
+    private func fetchLoginPublicKey() async throws -> String {
+        let payload = try await request(
+            baseURL: passBaseURL,
+            path: "/x/passport-login/web/key",
+            query: [
+                "disable_rcmd": "0",
+                "local_id": AppPreferences.anonymousBuvid3
+            ]
+        )
+
+        guard let key = payload.data.string("key"), !key.isEmpty else {
+            throw APIError.invalidResponse("缺少短信登录公钥")
+        }
+        return key
+    }
+
+    private func encryptRandomToken(usingPEM pem: String) throws -> String {
+        let publicKeyData = try publicKeyData(fromPEM: pem)
+        let attributes: [String: Any] = [
+            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
+            kSecAttrKeyClass as String: kSecAttrKeyClassPublic,
+            kSecAttrKeySizeInBits as String: 1024
+        ]
+
+        var error: Unmanaged<CFError>?
+        guard let secKey = SecKeyCreateWithData(publicKeyData as CFData, attributes as CFDictionary, &error) else {
+            throw APIError.invalidResponse((error?.takeRetainedValue() as Error?)?.localizedDescription ?? "创建短信登录公钥失败")
+        }
+
+        let random = Self.randomString(length: 16)
+        guard let encryptedData = SecKeyCreateEncryptedData(secKey, .rsaEncryptionPKCS1, Data(random.utf8) as CFData, &error) else {
+            throw APIError.invalidResponse((error?.takeRetainedValue() as Error?)?.localizedDescription ?? "短信登录随机串加密失败")
+        }
+
+        let encrypted = encryptedData as Data
+        return Self.percentEncode(encrypted.base64EncodedString())
+    }
+
+    private func publicKeyData(fromPEM pem: String) throws -> Data {
+        let content = pem
+            .replacingOccurrences(of: "-----BEGIN PUBLIC KEY-----", with: "")
+            .replacingOccurrences(of: "-----END PUBLIC KEY-----", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .joined()
+
+        guard let data = Data(base64Encoded: content) else {
+            throw APIError.invalidResponse("短信登录公钥格式无效")
+        }
+        return data
+    }
+
+    private func sanitizedCountryCode(_ value: String) -> String {
+        let digits = value.filter(\.isNumber)
+        return digits.isEmpty ? "86" : digits
+    }
+
+    private func sanitizedPhone(_ value: String) -> String {
+        value.filter(\.isNumber)
+    }
+
     private func currentMixinKey() async throws -> String {
         let today = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         if cachedMixinDay == today, let cachedMixinKey {
@@ -1265,6 +1473,11 @@ actor BiliAPIClient {
     private static func md5(_ string: String) -> String {
         let digest = Insecure.MD5.hash(data: Data(string.utf8))
         return digest.map { String(format: "%02hhx", $0) }.joined()
+    }
+
+    private static func randomString(length: Int) -> String {
+        let characters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        return String((0..<length).compactMap { _ in characters.randomElement() })
     }
 
     private static func percentEncode(_ string: String) -> String {

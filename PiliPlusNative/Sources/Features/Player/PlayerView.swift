@@ -283,6 +283,7 @@ final class PlayerViewModel: ObservableObject {
 struct PlayerView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
     @EnvironmentObject private var authStore: AuthStore
+    @Environment(\.scenePhase) private var scenePhase
 
     @StateObject private var viewModel: PlayerViewModel
 
@@ -363,6 +364,10 @@ struct PlayerView: View {
         .onDisappear {
             viewModel.persistCurrentProgress()
             viewModel.tearDown()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            viewModel.persistCurrentProgress()
         }
     }
 

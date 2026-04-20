@@ -129,6 +129,12 @@ struct QRCodeLoginInfo: Hashable {
     let url: String
 }
 
+struct SMSCodeLoginInfo: Hashable {
+    let captchaKey: String
+    let telephone: String
+    let countryCode: String
+}
+
 enum QRCodeLoginStatus {
     case pending
     case scanned

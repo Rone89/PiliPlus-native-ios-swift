@@ -13,6 +13,7 @@ enum AppPreferences {
     private static let showDanmakuKey = "preference_show_danmaku"
     private static let messageDeviceIDKey = "preference_message_device_id"
     private static let anonymousBuvid3Key = "preference_anonymous_buvid3"
+    private static let loginDeviceIDKey = "preference_login_device_id"
 
     static var playbackRate: Double {
         get {
@@ -73,6 +74,20 @@ enum AppPreferences {
         }
         set {
             defaults.set(newValue, forKey: anonymousBuvid3Key)
+        }
+    }
+
+    static var loginDeviceID: String {
+        get {
+            if let existing = defaults.string(forKey: loginDeviceIDKey), !existing.isEmpty {
+                return existing
+            }
+            let generated = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            defaults.set(generated, forKey: loginDeviceIDKey)
+            return generated
+        }
+        set {
+            defaults.set(newValue, forKey: loginDeviceIDKey)
         }
     }
 }
